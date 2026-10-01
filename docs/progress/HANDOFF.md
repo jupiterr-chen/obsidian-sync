@@ -1,44 +1,45 @@
 # 会话检查点 / HANDOFF
 
-更新：2026-10-01（P1 完成后，P2 开始前）。
+更新：2026-10-01（P6 离线部分完成后，本会话收尾）。
 
 ## 当前状态
 
-- M0 已完成（`0f3a19f`）；P1 已完成（`2889a12`，离线实现+验证），均已推送 obsidian-sync.git。
-- 主分支 main，远端唯一 `git@github.com:jupiterr-chen/obsidian-sync.git`。
-- 测试基线：**134 OK (1 skipped)** = 113 第一层回归 + 21 知识层。命令：PowerShell `$env:PYTHONPATH="app"; python -m unittest discover -s app/tests`。
-- 源工程 research-kb 未改动（基线 5442e397）；无运行中进程；工作树干净。
+- **M0、P1-P6 离线部分全部完成并验收**，提交已推送 obsidian-sync.git：
+  `0f3a19f`(M0) → `2889a12`(P1) → `1fd8d78`(P2) → `9eacef3`(P3) → `240b4dd`(P4) → `c4abc89`(P5) → P6 提交见 git log。
+- 测试基线：**202 OK (1 skipped)**（113 第一层回归 + 89 知识层）。
+  命令（原生 PowerShell）：`$env:PYTHONPATH="app"; python -m unittest discover -s app/tests`
+- 源工程 research-kb 未改动（基线 5442e397）；ResearchVault/ResearchTools 未触碰；无生产服务启动/重启；无真实模型调用；工作树干净。
 
-## 已完成任务
+## 已完成任务（摘要，详见各报告）
 
-- M0：整合（49 文件、manifest、报告）。
-- P1：接口审计报告、ADR0003、app/knowledge（store/snapshot/sync/jobs/sampling/measure + CLI `python -m knowledge ...`）。真实 A01/A04/A05 BLOCKED 已记录。
+| 阶段 | 交付 | 报告 |
+|---|---|---|
+| M0 | 49 文件复制整合+manifest+根配置合并 | m0-report.md |
+| P1 | 知识库存储/不可变快照/幂等同步/抽样与测量工具（ADR0003） | p1-report.md, p1-01-interface-audit.md |
+| P2 | 提取器注册表（txt/html/pdf/img）+证据块+质量路由+OCR接口+数值规范化（ADR0004） | p2-report.md |
+| P3 | 混合分词 BM25 索引+generation 原子发布+/api/kb/v1+事件流+证据链接（ADR0005） | p3-report.md |
+| P4 | provider 抽象（默认关闭）+RRF 混合召回+引用验证分析+用量账本+预算门禁（ADR0006） | p4-report.md |
+| P5 | claim/decision 追加式历史+决策冻结+影响分析 proposal+安全写回 | p5-report.md |
+| P6 | worker 周期闭环+心跳监控+在线备份/恢复演练+compose 准备+接入示例 | p6-report.md |
 
 ## 失败测试 / 已知问题
 
-- 无失败。skip 1 项为源工程原有。已知限制见 p1-report.md（快照存储≈源库体积、PDF正文/OCR留P2、language=unknown层）。
+- 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
-## 下一步（P2 起点）
+## 剩余工作 = 外部条件依赖（合并缺项清单）
 
-1. P2 ADR：解析器选型（纯标准库文本/PDF文字层/HTML DOM 的离线实现边界；OCR 本地引擎与外部依赖的引入策略——默认不装重依赖，先标准库+可插拔接口）。
-2. `app/knowledge/extract.py`：extraction_id（源版本+解析器+配置摘要）、extract stage 任务、正文/块/locator 存储表、证据块 schema 对齐 contracts/evidence-block.schema.json。
-3. 按页质量判断与 OCR 路由接口（本地引擎可插拔；无引擎时诚实标 not_extracted）。
-4. HTML DOM 解析（标准库 HTMLParser）+ 固定快照证据视图准备。
-5. 更新 measure.py 挂接真实提取器，使 P1-04 工具在 P2 后可测 PDF 页数/正文。
+1. **真实源访问**（服务器只读路径或本地挂载）：A01 清单对账、A04 真实 30 样本、A05 真实 token 测量、A10 真实检索基准、A14 全量影子回填（523 基线）。具备后执行：`python -m knowledge sync → run-snapshots → run-extracts → rebuild-index`，再 `sample/measure`（接真实 tokenizer counter）。
+2. **生产主机与部署授权**（主机、目录、运行用户、回滚）：compose 已备（deploy/docker-compose.knowledge.yml）；A21 性能与 7 天记录、A22 真实恢复演练、P6 全部生产门禁。
+3. **模型供应商+凭据方式+外发范围+预算**：P4 真实适配器（providers.py 预留）、A16 成本、A17 分析评测、真实 tokenizer。
+4. **OCR 引擎选型**（本地、离线、许可）：P2 真实 OCR 质量门禁（A08 真实部分）。
+5. **真实 Vault 写回授权**（登记 `自动研究候选/` 等生成目录）：P5-03 生产启用。
 
-## 阻塞 / 缺项（合并清单）
+## 准确续跑起点
 
-- 真实源资料访问（本地只读路径或服务器）→ A01/A04/A05 真实部分、全量对账 BLOCKED。
-- LLM/embedding 供应商、凭据、预算 → P4 真实调用 BLOCKED（默认关闭）。
-- 生产服务器访问 → P3 影子回填生产部分、P6 BLOCKED（配置可离线准备）。
-- OCR 本地引擎选型（PaddleOCR/Tesseract）许可与离线能力 → P2 真实 OCR 质量门禁 BLOCKED；接口与合成路由测试先行。
+- 读本文件 → docs/progress/task-status.md（状态表）→ 对应阶段报告的「BLOCKED/已知限制」节。
+- 任何新会话先跑全量测试确认基线，再从上述缺项中已具备的条件切入；无需重做 M0-P6 离线部分。
+- 约束提醒：不修改源工程/原始归档；不 force-push；不猜凭据；OCR/LLM 独立 worker；`/api/v1` 行为保持；人工笔记零覆盖。
 
-## 阻塞 / 缺项（合并清单）
+## 会话执行说明
 
-- 真实源资料访问方式（本地只读路径或服务器）未提供 → P1 真实样本测量、A01/A04/A05 真实部分 BLOCKED。
-- LLM/embedding 供应商、凭据、预算未定 → P4 真实调用 BLOCKED（默认关闭，不影响 P1-P3 离线开发）。
-- 生产服务器访问未授权 → P3 全量影子回填生产部分、P6 全部 BLOCKED（部署配置可离线准备）。
-
-## 约束提醒
-
-不修改源工程与两份原始归档；不 force-push；不猜凭据；OCR/LLM 走独立 worker；`/api/v1` 行为保持，新接口 `/api/kb/v1`；人工笔记不自动覆盖。
+本会话为普通交互会话，无自动唤醒能力：会话结束后不会后台继续。所有已声明完成的工作均已在本会话内执行、测试并推送；未执行事项均如实标注 NOT_RUN/BLOCKED，无虚构。

@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from .config import KnowledgeConfig
 from .jobs import run_knowledge_command
@@ -18,12 +19,17 @@ def main(argv=None) -> int:
         prog="knowledge", description="Research KB knowledge layer")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("sync", "run-snapshots", "run-extracts", "rebuild-index",
-                 "serve-kb", "status", "sample", "measure", "evidence-links"):
+                 "serve-kb", "worker", "status", "sample", "measure",
+                 "evidence-links"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
         if name in ("run-snapshots", "run-extracts"):
             child.add_argument("--limit", type=int, default=None,
                                help="process at most N jobs in this run")
+        if name == "worker":
+            child.add_argument("--interval", type=int, default=3600)
+            child.add_argument("--once", action="store_true",
+                               help="run a single cycle and exit")
         if name == "rebuild-index":
             child.add_argument("--force", action="store_true",
                                help="rebuild even when the manifest is unchanged")
@@ -86,6 +92,27 @@ def main(argv=None) -> int:
         summary = report["summary"]
         print(json.dumps({"ok": True, "out": args.out, "summary": summary},
                          ensure_ascii=False))
+        return 0
+
+    if args.command == "worker":
+        from library.config import Config
+        from .worker import KnowledgeWorker, run_cycle
+
+        library_config = Config.load(config.library_config).resolve(
+            os.path.dirname(os.path.abspath(config.library_config)))
+        if args.once:
+            result = run_cycle(config, library_config)
+            print(json.dumps(result, ensure_ascii=False, indent=2,
+                             default=str))
+            return 0 if result.get("ok") else 1
+        worker = KnowledgeWorker(config, library_config,
+                                 interval_seconds=args.interval)
+        worker.start()
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            worker.stop()
         return 0
 
     result = run_knowledge_command(config, args.command, limit=getattr(args, "limit", None))

@@ -26,7 +26,9 @@
 |P5-01 claim/decision版本与review|accepted（源码+离线）|main-agent|P4-03|见P5提交|docs/progress/p5-report.md|无|已完成|
 |P5-02 更新影响与反证候选|accepted（离线）/A20真实评测BLOCKED|main-agent|P5-01|见P5提交|docs/progress/p5-report.md|真实新旧版本语料|真实化后评测|
 |P5-03 Obsidian安全成果写回|accepted（机制+离线）/真实Vault BLOCKED|main-agent|P5-01|见P5提交|docs/progress/p5-report.md|写回路径授权与目录登记|用户登记后启用|
-|P6-01..03 调度监控/备份恢复/应用接入|todo|main-agent|P3|—|—|生产主机访问|部署配置与演练工具可先行|
+|P6-01 生产调度、监控与资源限制|accepted（源码+离线+compose准备）/A21生产NOT_RUN|main-agent|P3|见P6提交|docs/progress/p6-report.md|生产主机|部署后7天记录与性能实测|
+|P6-02 备份、恢复及回滚|accepted（工具+离线演练）/A22真实演练BLOCKED|main-agent|P3|见P6提交|docs/progress/p6-report.md|同上|生产后真实RPO/RTO演练|
+|P6-03 研发与资金应用接入|accepted（接入上下文清单+示例）/真实客户端BLOCKED|main-agent|P3|见P6提交|docs/progress/p6-report.md|客户端与生产|接入验收A13/A19|
 
 ## 记录
 
@@ -36,3 +38,4 @@
 - 2026-10-01：P3 完成（离线）。indexing/kbapi/cards + 事件流；/api/kb/v1 全路由与鉴权（ADR0005，独立端口）；影子索引原子发布；171 测试全过。A10 真实基准/A14 生产对账/A21 性能 BLOCKED（真实语料与服务器未具备）。
 - 2026-10-01：P4 完成（离线）。ADR0006 + providers/analysis；RRF 混合召回、引用验证、usage_events 账本、预算门禁；185 测试全过。真实 provider/质量/成本 BLOCKED（供应商、凭据、预算未定）。
 - 2026-10-01：P5 完成（离线）。memory/writeback：追加式 claim 历史、决策冻结、影响分析 proposal（不自动覆盖）、哈希门禁写回；196 测试全过。真实 Vault 写回与 A20 真实评测 BLOCKED。
+- 2026-10-01：P6 离线部分完成。worker（sync→快照→提取→索引→影响分析闭环+心跳）、在线备份/独立目录恢复演练、compose 准备、接入示例；202 测试全过。生产部署/A21/A22 BLOCKED。至此 M0+P1-P6 离线可完成部分全部完成；剩余工作均依赖外部条件（源访问/服务器/模型供应商/写回授权），见 HANDOFF。

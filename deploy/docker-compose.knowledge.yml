@@ -1,0 +1,63 @@
+# Knowledge layer services (P6-01 deployment preparation).
+#
+# Extends the first-layer docker-compose.yml (library + syncthing sidecar,
+# unchanged there). OCR / model-analysis workers stay SEPARATE processes so
+# heavy CPU/GPU work never blocks snapshot serving or the hourly schedule
+# (docs/11, ADR0002). Production values (hosts, paths, tokens) come from the
+# environment / .env; nothing private belongs in this file.
+
+x-knowledge-base: &knowledge-base
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  env_file:
+    - ../config/.env
+  volumes:
+    # first-layer catalog: READ-ONLY for the knowledge layer (ADR0003)
+    - ../catalog:/catalog:ro
+    - ../state:/state
+    - ../config:/app-config:ro
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  knowledge-worker:
+    <<: *knowledge-base
+    command: ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import sys; sys.path.insert(0, '/app'); "
+             "from knowledge.worker import read_state, worker_is_stale; "
+             "sys.exit(0 if worker_is_stale('/state/knowledge-worker.json') is False else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  knowledge-api:
+    <<: *knowledge-base
+    command: ["python", "-m", "knowledge", "serve-kb", "--config", "/app-config/knowledge.json"]
+    ports:
+      - "127.0.0.1:8766:8766"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/kb/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # Future: ocr-worker / analysis-worker with their own resource envelopes;
+  # deliberately absent until engines/providers are selected (BLOCKED).
