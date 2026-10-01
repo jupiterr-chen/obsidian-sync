@@ -1,5 +1,6 @@
 # 总体架构设计
 
+> 最新决定：以本仓库统一纳入现有research-kb；先执行M0复制整合，复用app/library，新功能app/knowledge。详见[整合任务书](11-integration-taskbook.md)与[ADR0002](adr/0002-consolidate-main-repository.md)。本文件中早期独立服务框架仅作职责参考。
 ## 目标与范围
 
 在现有资料接入与卡片系统上增加全文、可追溯证据、检索接口、带引用分析和长期研究记忆。生成流水线可重复、可恢复、可增量升级。人的研究判断保留历史和控制权。初始工程不替换 library 或 Syncthing，不部署交易执行系统。

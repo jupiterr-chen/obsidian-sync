@@ -1,5 +1,6 @@
 # 分阶段交付、任务划分与依赖
 
+> 最新决定：以本仓库统一纳入现有research-kb；先执行M0复制整合，复用app/library，新功能app/knowledge。详见[整合任务书](11-integration-taskbook.md)与[ADR0002](adr/0002-consolidate-main-repository.md)。本文件中早期独立服务框架仅作职责参考。
 当前只交付 P0。P1-P6 均为待实施，不把计划当作完成记录。负责人是角色分工，未默认启动并行代理；每个任务由实施人员认领后记录实际负责人、提交和验收报告。
 
 ## 阶段与交付门禁
