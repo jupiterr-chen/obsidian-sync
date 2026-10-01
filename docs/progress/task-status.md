@@ -23,7 +23,9 @@
 |P4-01 embedding选型及预算|accepted（抽象+账本+mock）/真实BLOCKED|main-agent|P1-04/P3|见P4提交|docs/progress/p4-report.md|供应商与预算未定|用户给定后接入真实适配器|
 |P4-02 混合召回及可选重排|accepted（RRF+缓存）/真实基准NOT_RUN|main-agent|P4-01|见P4提交|docs/progress/p4-report.md|同上|rerank真实评测后决定|
 |P4-03 分析、引用验证、成本账本|accepted（源码+mock）/真实评测BLOCKED|main-agent|P4-02|见P4提交|docs/progress/p4-report.md|同上|真实化后执行A17|
-|P5-01..03 记忆/影响分析/写回|todo|main-agent|P4|—|—|真实写回授权|离线状态机先行|
+|P5-01 claim/decision版本与review|accepted（源码+离线）|main-agent|P4-03|见P5提交|docs/progress/p5-report.md|无|已完成|
+|P5-02 更新影响与反证候选|accepted（离线）/A20真实评测BLOCKED|main-agent|P5-01|见P5提交|docs/progress/p5-report.md|真实新旧版本语料|真实化后评测|
+|P5-03 Obsidian安全成果写回|accepted（机制+离线）/真实Vault BLOCKED|main-agent|P5-01|见P5提交|docs/progress/p5-report.md|写回路径授权与目录登记|用户登记后启用|
 |P6-01..03 调度监控/备份恢复/应用接入|todo|main-agent|P3|—|—|生产主机访问|部署配置与演练工具可先行|
 
 ## 记录
@@ -33,3 +35,4 @@
 - 2026-10-01：P2 完成（离线）。ADR0004 + extract/quality/tables/schema 模块；提取器注册表（txt/html/pdf/img 标准库实现）；不可变 extractions/blocks 对齐 evidence-block 契约；153 测试全过。真实 A06-A09 盲测/OCR/财务门禁 BLOCKED（解析器选型、OCR 引擎、真实样本未具备）。
 - 2026-10-01：P3 完成（离线）。indexing/kbapi/cards + 事件流；/api/kb/v1 全路由与鉴权（ADR0005，独立端口）；影子索引原子发布；171 测试全过。A10 真实基准/A14 生产对账/A21 性能 BLOCKED（真实语料与服务器未具备）。
 - 2026-10-01：P4 完成（离线）。ADR0006 + providers/analysis；RRF 混合召回、引用验证、usage_events 账本、预算门禁；185 测试全过。真实 provider/质量/成本 BLOCKED（供应商、凭据、预算未定）。
+- 2026-10-01：P5 完成（离线）。memory/writeback：追加式 claim 历史、决策冻结、影响分析 proposal（不自动覆盖）、哈希门禁写回；196 测试全过。真实 Vault 写回与 A20 真实评测 BLOCKED。

@@ -336,6 +336,50 @@ class KbApi:
             "usage": usage, "error": run.get("error"),
         }
 
+    # ---------------------------------------------------------------- memory
+    def list_claims(self, status: Optional[str] = None) -> Dict[str, Any]:
+        return {"claims": self.kb.list_claims(status=status)}
+
+    def get_claim(self, claim_id: str) -> Dict[str, Any]:
+        claim = self.kb.get_claim(claim_id)
+        if claim is None:
+            raise KbApiError(404, "not_found", "claim not found")
+        claim["history"] = self.kb.claim_history(claim_id)
+        return claim
+
+    def review_claim_route(self, claim_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        from .memory import review_claim
+
+        action = body.get("action")
+        reviewer = body.get("reviewer")
+        if not action or not reviewer:
+            raise KbApiError(400, "invalid_body", "action and reviewer are required")
+        try:
+            return review_claim(
+                self.kb, claim_id, str(action), str(reviewer),
+                note=body.get("note"),
+                new_statement=body.get("statement"),
+                new_evidence=body.get("evidence"),
+                new_counterevidence=body.get("counterevidence"))
+        except ValueError as exc:
+            raise KbApiError(404 if "not found" in str(exc) else 400,
+                             "not_found" if "not found" in str(exc) else "invalid_action",
+                             str(exc))
+
+    def review_proposal_route(self, proposal_id: str,
+                              body: Dict[str, Any]) -> Dict[str, Any]:
+        from .memory import resolve_proposal
+
+        action = body.get("action")
+        reviewer = body.get("reviewer")
+        if not action or not reviewer:
+            raise KbApiError(400, "invalid_body", "action and reviewer are required")
+        try:
+            return resolve_proposal(self.kb, proposal_id, str(action),
+                                    str(reviewer))
+        except ValueError as exc:
+            raise KbApiError(404, "not_found", str(exc))
+
 
 def load_tokens(config_dict: Dict[str, Any]) -> Dict[str, List[str]]:
     """Tokens from config; production injects via environment instead."""
@@ -445,6 +489,25 @@ class Handler(BaseHTTPRequestHandler):
                 cursor = (self._query().get("cursor") or [None])[0]
                 limit = int((self._query().get("limit") or ["100"])[0])
                 return self._send(200, self.api.changes(cursor, limit), head_only)
+
+            if route[:1] == ["claims"]:
+                self.api.authenticate(self._bearer(), PERM_READ)
+                if len(route) == 1:
+                    status = (self._query().get("status") or [None])[0]
+                    return self._send(200, self.api.list_claims(status), head_only)
+                if len(route) == 2:
+                    return self._send(200, self.api.get_claim(route[1]), head_only)
+                if len(route) == 3 and route[2] == "review" and self.command == "POST":
+                    self.api.authenticate(self._bearer(), "memory.review")
+                    return self._send(200, self.api.review_claim_route(
+                        route[1], self._read_json_body()), head_only)
+                raise KbApiError(404, "not_found", "not found")
+
+            if route[:1] == ["memory-proposals"] and len(route) == 3 \
+                    and route[2] == "review" and self.command == "POST":
+                self.api.authenticate(self._bearer(), "memory.review")
+                return self._send(200, self.api.review_proposal_route(
+                    route[1], self._read_json_body()), head_only)
 
             raise KbApiError(404, "not_found", "not found")
         except KbApiError as exc:

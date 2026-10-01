@@ -199,6 +199,51 @@ CREATE TABLE IF NOT EXISTS usage_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,
+    current_revision INTEGER NOT NULL,
+    subject TEXT,
+    statement TEXT NOT NULL,
+    status TEXT NOT NULL,             -- proposed|accepted|challenged|superseded|rejected
+    author TEXT,
+    prompt_version TEXT,
+    evidence_json TEXT NOT NULL DEFAULT '[]',
+    counterevidence_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS claim_revisions (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    statement TEXT NOT NULL,
+    status TEXT NOT NULL,
+    evidence_json TEXT,
+    counterevidence_json TEXT,
+    reviewer TEXT,
+    reviewed_at TEXT,
+    review_note TEXT,
+    supersedes_revision INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claim_revisions_claim
+    ON claim_revisions(claim_id, revision);
+CREATE TABLE IF NOT EXISTS decisions (
+    decision_id TEXT PRIMARY KEY,
+    recorded_at TEXT NOT NULL,
+    context TEXT,
+    rationale TEXT,
+    claim_refs_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS review_proposals (
+    proposal_id TEXT PRIMARY KEY,
+    claim_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    detail_json TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL
+);
 """
 
 JOB_PENDING = "pending"
@@ -765,6 +810,155 @@ class KnowledgeStore:
                 "SELECT * FROM usage_events WHERE run_id=? ORDER BY id",
                 (run_id,)).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------ memory
+    def upsert_claim(self, claim: Dict[str, Any]) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO claims (claim_id, current_revision, subject, statement,"
+                " status, author, prompt_version, evidence_json, counterevidence_json,"
+                " created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(claim_id) DO UPDATE SET"
+                " current_revision=excluded.current_revision, subject=excluded.subject,"
+                " statement=excluded.statement, status=excluded.status,"
+                " evidence_json=excluded.evidence_json,"
+                " counterevidence_json=excluded.counterevidence_json,"
+                " updated_at=excluded.updated_at",
+                (claim["claim_id"], claim["current_revision"], claim.get("subject"),
+                 claim["statement"], claim["status"], claim.get("author"),
+                 claim.get("prompt_version"),
+                 json.dumps(claim.get("evidence") or [], ensure_ascii=False),
+                 json.dumps(claim.get("counterevidence") or [], ensure_ascii=False),
+                 claim.get("created_at") or utc_now(), utc_now()),
+            )
+
+    def add_claim_revision(self, revision: Dict[str, Any]) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO claim_revisions (claim_id, revision, statement, status,"
+                " evidence_json, counterevidence_json, reviewer, reviewed_at,"
+                " review_note, supersedes_revision, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (revision["claim_id"], revision["revision"], revision["statement"],
+                 revision["status"],
+                 json.dumps(revision.get("evidence") or [], ensure_ascii=False),
+                 json.dumps(revision.get("counterevidence") or [], ensure_ascii=False),
+                 revision.get("reviewer"), revision.get("reviewed_at"),
+                 revision.get("review_note"), revision.get("supersedes_revision"),
+                 utc_now()),
+            )
+
+    def get_claim(self, claim_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM claims WHERE claim_id=?", (claim_id,)).fetchone()
+        if not row:
+            return None
+        return self._decode_claim(row)
+
+    def claim_history(self, claim_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM claim_revisions WHERE claim_id=? ORDER BY revision",
+                (claim_id,)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["evidence"] = json.loads(item.pop("evidence_json") or "[]")
+            item["counterevidence"] = json.loads(
+                item.pop("counterevidence_json") or "[]")
+            result.append(item)
+        return result
+
+    def list_claims(self, status: Optional[str] = None,
+                    subject: Optional[str] = None) -> List[Dict[str, Any]]:
+        where, params = [], []
+        if status:
+            where.append("status=?")
+            params.append(status)
+        if subject:
+            where.append("subject=?")
+            params.append(subject)
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM claims%s ORDER BY updated_at DESC" % clause,
+                params).fetchall()
+        return [self._decode_claim(row) for row in rows]
+
+    def _decode_claim(self, row) -> Dict[str, Any]:
+        item = dict(row)
+        item["evidence"] = json.loads(item.pop("evidence_json") or "[]")
+        item["counterevidence"] = json.loads(
+            item.pop("counterevidence_json") or "[]")
+        return item
+
+    def claims_referencing_doc(self, source: str, doc_id: str,
+                               version_id: Optional[str] = None
+                               ) -> List[Dict[str, Any]]:
+        """Claims whose evidence cites any block of this document version."""
+        claims = self.list_claims()
+        out = []
+        for claim in claims:
+            for ref in claim.get("evidence") or []:
+                if ref.get("source") == source and ref.get("doc_id") == doc_id and (
+                        version_id is None or ref.get("version_id") == version_id):
+                    out.append(claim)
+                    break
+        return out
+
+    def record_decision(self, decision: Dict[str, Any]) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO decisions (decision_id, recorded_at, context,"
+                " rationale, claim_refs_json, created_at) VALUES (?,?,?,?,?,?)",
+                (decision["decision_id"], decision["recorded_at"],
+                 decision.get("context"), decision.get("rationale"),
+                 json.dumps(decision.get("claim_refs") or [], ensure_ascii=False),
+                 utc_now()),
+            )
+
+    def get_decision(self, decision_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM decisions WHERE decision_id=?",
+                (decision_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["claim_refs"] = json.loads(item.pop("claim_refs_json") or "[]")
+        return item
+
+    def add_review_proposal(self, proposal: Dict[str, Any]) -> bool:
+        with self._tx() as conn:
+            cur = conn.execute(
+                "INSERT INTO review_proposals (proposal_id, claim_id, reason,"
+                " detail_json, status, created_at) VALUES (?,?,?,?,?,?)"
+                " ON CONFLICT(proposal_id) DO NOTHING",
+                (proposal["proposal_id"], proposal["claim_id"], proposal["reason"],
+                 json.dumps(proposal.get("detail") or {}, ensure_ascii=False),
+                 proposal.get("status", "open"), utc_now()),
+            )
+            return cur.rowcount == 1
+
+    def list_review_proposals(self, status: str = "open") -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM review_proposals WHERE status=? ORDER BY created_at",
+                (status,)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["detail"] = json.loads(item.pop("detail_json") or "{}")
+            result.append(item)
+        return result
+
+    def update_review_proposal(self, proposal_id: str, status: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE review_proposals SET status=? WHERE proposal_id=?",
+                (status, proposal_id),
+            )
 
     def has_extraction(self, extraction_id: str) -> bool:
         with self._lock:
