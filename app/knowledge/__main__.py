@@ -115,12 +115,23 @@ def main(argv=None) -> int:
         print(json.dumps(links, ensure_ascii=False, indent=2))
         return 0
     if args.command == "serve-kb":
+        from .analysis import Budget
         from .kbapi import build_kb_server, load_tokens
+        from .providers import load_providers
         from .store import KnowledgeStore
 
         kb = KnowledgeStore(config.knowledge_db)
         tokens = load_tokens(config.extra)
-        server = build_kb_server(kb, tokens, config.kb_bind_host, config.kb_bind_port)
+        providers = load_providers(config.extra)
+        embedder = chat = None
+        for provider in providers.values():
+            if embedder is None and hasattr(provider, "embed"):
+                embedder = provider
+            if chat is None and hasattr(provider, "complete"):
+                chat = provider
+        budget = Budget.from_dict((config.extra.get("providers") or {}).get("budget", {}))
+        server = build_kb_server(kb, tokens, config.kb_bind_host, config.kb_bind_port,
+                                 embedder=embedder, chat=chat, budget=budget)
         print("knowledge api serving on http://%s:%d/api/kb/v1"
               % (config.kb_bind_host, config.kb_bind_port), flush=True)
         try:

@@ -165,6 +165,40 @@ CREATE TABLE IF NOT EXISTS kb_events (
     payload_version INTEGER NOT NULL DEFAULT 1,
     payload_json TEXT
 );
+CREATE TABLE IF NOT EXISTS block_embeddings (
+    model TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    vector_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (model, block_id)
+);
+CREATE TABLE IF NOT EXISTS analysis_runs (
+    run_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,             -- pending | running | done | failed
+    query TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'keyword',
+    prompt_version TEXT,
+    draft TEXT,
+    citations_json TEXT,
+    verification_json TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS usage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    kind TEXT NOT NULL,               -- embedding | chat
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_basis TEXT NOT NULL DEFAULT 'unknown',
+    run_id TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
 """
 
 JOB_PENDING = "pending"
@@ -630,6 +664,107 @@ class KnowledgeStore:
             row = self._conn.execute(
                 "SELECT COALESCE(MAX(sequence),0) s FROM kb_events").fetchone()
         return row["s"]
+
+    # ----------------------------------------------------- embeddings & runs
+    def get_embedding(self, model: str, block_id: str) -> Optional[List[float]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT vector_json FROM block_embeddings WHERE model=? AND block_id=?",
+                (model, block_id)).fetchone()
+        return json.loads(row["vector_json"]) if row else None
+
+    def put_embeddings(self, model: str, vectors: Dict[str, List[float]]) -> None:
+        now = utc_now()
+        with self._tx() as conn:
+            for block_id, vector in vectors.items():
+                conn.execute(
+                    "INSERT INTO block_embeddings (model, block_id, dim, vector_json,"
+                    " created_at) VALUES (?,?,?,?,?)"
+                    " ON CONFLICT(model, block_id) DO UPDATE SET"
+                    " vector_json=excluded.vector_json, dim=excluded.dim",
+                    (model, block_id, len(vector),
+                     json.dumps(vector), now),
+                )
+
+    def create_analysis_run(self, query: str, mode: str = "keyword",
+                            prompt_version: str = "pv1") -> Dict[str, Any]:
+        run_id = "run-" + hashlib.sha256(
+            ("\x00".join((query, mode, prompt_version,
+                          utc_now()))).encode("utf-8")).hexdigest()[:24]
+        now = utc_now()
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO analysis_runs (run_id, status, query, mode,"
+                " prompt_version, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?)"
+                " ON CONFLICT(run_id) DO NOTHING",
+                (run_id, "pending", query, mode, prompt_version, now, now),
+            )
+        return {"run_id": run_id, "status": "pending", "query": query, "mode": mode}
+
+    def get_analysis_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM analysis_runs WHERE run_id=?", (run_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        for key in ("citations", "verification"):
+            json_key = key + "_json"
+            if json_key in result:
+                try:
+                    result[key] = json.loads(result.pop(json_key) or "null")
+                except (ValueError, TypeError):
+                    result[key] = None
+        return result
+
+    def update_analysis_run(self, run_id: str, **fields: Any) -> None:
+        allowed = {"status", "draft", "citations_json", "verification_json",
+                   "error", "finished_at", "mode"}
+        mapped = {}
+        if "citations" in fields:
+            mapped["citations_json"] = json.dumps(
+                fields.pop("citations"), ensure_ascii=False)
+        if "verification" in fields:
+            mapped["verification_json"] = json.dumps(
+                fields.pop("verification"), ensure_ascii=False)
+        mapped.update({k: v for k, v in fields.items() if k in allowed})
+        if not mapped:
+            return
+        mapped["updated_at"] = utc_now()
+        assignments = ", ".join("%s=?" % k for k in mapped)
+        with self._tx() as conn:
+            conn.execute("UPDATE analysis_runs SET %s WHERE run_id=?" % assignments,
+                         (*mapped.values(), run_id))
+
+    def record_usage(self, provider: str, model: str, kind: str,
+                     input_tokens: int, output_tokens: int,
+                     cost_basis: str, run_id: Optional[str] = None) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO usage_events (provider, model, kind, input_tokens,"
+                " output_tokens, cost_basis, run_id, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?)",
+                (provider, model, kind, int(input_tokens), int(output_tokens),
+                 cost_basis, run_id, utc_now()),
+            )
+
+    def usage_totals(self, since: Optional[str] = None) -> Dict[str, int]:
+        where = " WHERE created_at >= ?" if since else ""
+        params = (since,) if since else ()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(input_tokens),0) i, COALESCE(SUM(output_tokens),0) o,"
+                " COUNT(*) calls FROM usage_events" + where, params).fetchone()
+        return {"input_tokens": row["i"], "output_tokens": row["o"],
+                "calls": row["calls"]}
+
+    def usage_for_run(self, run_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM usage_events WHERE run_id=? ORDER BY id",
+                (run_id,)).fetchall()
+        return [dict(r) for r in rows]
 
     def has_extraction(self, extraction_id: str) -> bool:
         with self._lock:

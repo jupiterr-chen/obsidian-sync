@@ -17,6 +17,7 @@ import os
 import traceback
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -55,9 +56,14 @@ def decode_cursor(cursor: str) -> Dict[str, Any]:
 class KbApi:
     """Request handling logic, transport-agnostic for testability."""
 
-    def __init__(self, kb: KnowledgeStore, tokens: Dict[str, List[str]]):
+    def __init__(self, kb: KnowledgeStore, tokens: Dict[str, List[str]],
+                 embedder: Any = None, chat: Any = None,
+                 budget: Any = None):
         self.kb = kb
         self.tokens = tokens
+        self.embedder = embedder
+        self.chat = chat
+        self.budget = budget
 
     def authenticate(self, bearer: Optional[str], permission: str) -> str:
         if not bearer:
@@ -85,7 +91,9 @@ class KbApi:
             raise KbApiError(400, "invalid_query",
                              "query longer than %d characters" % MAX_QUERY_CHARS)
         mode = body.get("mode", "keyword")
-        if mode != "keyword":
+        if mode not in ("keyword", "hybrid"):
+            raise KbApiError(400, "invalid_mode", "mode must be keyword|hybrid")
+        if mode == "hybrid" and self.embedder is None:
             raise KbApiError(422, "mode_unavailable",
                              "mode %r is not enabled in this deployment" % mode)
         raw_filters = body.get("filters") or {}
@@ -122,10 +130,22 @@ class KbApi:
                                  "index generation changed since the cursor was issued")
             offset = int(decoded.get("offset", 0))
 
-        result = search(self.kb, query, filters, limit=limit + 1)
-        if not result.get("ok"):
-            raise KbApiError(503, "not_ready", result.get("error", "not ready"))
-        hits = result["hits"]
+        if mode == "hybrid":
+            from .analysis import hybrid_search
+
+            result = hybrid_search(self.kb, query, self.embedder, filters,
+                                   limit=limit + 1)
+            if not result.get("ok"):
+                raise KbApiError(503, "not_ready", result.get("error", "not ready"))
+            hits = [SimpleNamespace(block=h["block"], score=h["score"],
+                                    score_kind=h["score_kind"],
+                                    matched_terms=h.get("matched_terms", []))
+                    for h in result["hits"]]
+        else:
+            result = search(self.kb, query, filters, limit=limit + 1)
+            if not result.get("ok"):
+                raise KbApiError(503, "not_ready", result.get("error", "not ready"))
+            hits = result["hits"]
         page = hits[offset:offset + limit]
         next_cursor = None
         if offset + limit < len(hits):
@@ -268,10 +288,53 @@ class KbApi:
             next_cursor = encode_cursor({"sequence": events[-1]["sequence"]})
         return {"events": events, "next_cursor": next_cursor}
 
-    def create_analysis_run(self, _body: Dict[str, Any]) -> Dict[str, Any]:
-        raise KbApiError(422, "task_disabled",
-                         "analysis runs are not enabled in this deployment",
-                         retryable=False)
+    def create_analysis_run(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        if self.chat is None:
+            raise KbApiError(422, "task_disabled",
+                             "analysis runs are not enabled in this deployment",
+                             retryable=False)
+        query = body.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise KbApiError(400, "invalid_query", "query must be a non-empty string")
+        mode = body.get("mode", "keyword")
+        if mode == "hybrid" and self.embedder is None:
+            raise KbApiError(422, "mode_unavailable",
+                             "hybrid mode is not enabled in this deployment")
+        from .analysis import execute_analysis_run
+
+        created = self.kb.create_analysis_run(query, mode=mode)
+        if body.get("execute", True):
+            def retriever(q, k):
+                if mode == "hybrid":
+                    from .analysis import hybrid_search
+
+                    result = hybrid_search(self.kb, q, self.embedder, None, limit=k)
+                    return result.get("hits", [])
+                result = search(self.kb, q, None, limit=k)
+                return result.get("hits", [])
+
+            outcome = execute_analysis_run(
+                self.kb, created["run_id"], query, self.chat,
+                retriever=retriever, budget=self.budget)
+            if outcome.get("status") == "failed":
+                raise KbApiError(422, "analysis_failed",
+                                 outcome.get("error", "analysis failed"),
+                                 retryable=outcome.get("retryable", False))
+        return self.get_analysis_run(created["run_id"])
+
+    def get_analysis_run(self, run_id: str) -> Dict[str, Any]:
+        run = self.kb.get_analysis_run(run_id)
+        if run is None:
+            raise KbApiError(404, "not_found", "analysis run not found")
+        usage = self.kb.usage_for_run(run_id)
+        return {
+            "run_id": run["run_id"], "status": run["status"],
+            "query": run["query"], "mode": run["mode"],
+            "draft": run.get("draft"),
+            "citations": run.get("citations"),
+            "verification": run.get("verification"),
+            "usage": usage, "error": run.get("error"),
+        }
 
 
 def load_tokens(config_dict: Dict[str, Any]) -> Dict[str, List[str]]:
@@ -339,14 +402,20 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._read_json_body()
                 return self._send(200, self.api.do_search(body), head_only)
 
-            if route[:1] == ["analysis-runs"] and self.command == "POST":
-                self.api.authenticate(self._bearer(), "analysis.run")
-                body = self._read_json_body()
-                try:
-                    payload = self.api.create_analysis_run(body)
-                    return self._send(200, payload, head_only)
-                except KbApiError as exc:
-                    return self._error(exc, head_only)
+            if route[:1] == ["analysis-runs"]:
+                if self.command == "POST" and len(route) == 1:
+                    self.api.authenticate(self._bearer(), "analysis.run")
+                    body = self._read_json_body()
+                    try:
+                        payload = self.api.create_analysis_run(body)
+                        return self._send(200, payload, head_only)
+                    except KbApiError as exc:
+                        return self._error(exc, head_only)
+                if self.command == "GET" and len(route) == 2:
+                    self.api.authenticate(self._bearer(), "analysis.run")
+                    return self._send(200, self.api.get_analysis_run(route[1]),
+                                      head_only)
+                raise KbApiError(404, "not_found", "not found")
 
             if route[:1] == ["documents"]:
                 self.api.authenticate(self._bearer(), PERM_READ)
@@ -417,8 +486,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def build_kb_server(kb: KnowledgeStore, tokens: Dict[str, List[str]],
-                    host: str = "127.0.0.1", port: int = 8766) -> ThreadingHTTPServer:
-    api = KbApi(kb, tokens)
+                    host: str = "127.0.0.1", port: int = 8766,
+                    embedder: Any = None, chat: Any = None,
+                    budget: Any = None) -> ThreadingHTTPServer:
+    api = KbApi(kb, tokens, embedder=embedder, chat=chat, budget=budget)
     handler = type("BoundKbHandler", (Handler,), {"api": api})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
