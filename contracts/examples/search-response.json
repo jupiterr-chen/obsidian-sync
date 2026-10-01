@@ -1,0 +1,42 @@
+{
+  "request_id": "synthetic-request",
+  "generation_id": "generation-example",
+  "normalized_filters": {
+    "collections": [
+      "source_documents"
+    ]
+  },
+  "hits": [
+    {
+      "schema_version": "1",
+      "source": "synthetic",
+      "doc_id": "example-001",
+      "source_version": "v1",
+      "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "extraction_id": "extract-example-v1",
+      "block_id": "block-example-p1-1",
+      "block_type": "paragraph",
+      "text": "合成示例：本季度毛利率为30%。该内容不代表任何真实公司。",
+      "locator": {
+        "kind": "pdf",
+        "page": 1,
+        "bbox": [
+          10,
+          20,
+          300,
+          70
+        ],
+        "coordinate_system": "points-top-left"
+      },
+      "quality": {
+        "status": "ready",
+        "issues": []
+      },
+      "evidence_url": "/api/kb/v1/evidence/block-example-p1-1",
+      "source_version_url": "/api/kb/v1/documents/synthetic/example-001/versions/v1",
+      "score_kind": "bm25",
+      "score": 1.0
+    }
+  ],
+  "next_cursor": null
+}

@@ -1,0 +1,26 @@
+# Runtime and private material
+.env
+.env.*
+!.env.example
+runtime/
+data/
+artifacts/
+logs/
+backups/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+ResearchVault/
+ResearchTools/
+__pycache__/
+.pytest_cache/
+.venv/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.zip

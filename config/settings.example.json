@@ -1,0 +1,37 @@
+{
+  "schema_version": "1",
+  "library": {
+    "base_url": "http://library.internal:8765",
+    "credential_env": "LIBRARY_API_TOKEN",
+    "read_only": true
+  },
+  "runtime": {
+    "root": "./runtime",
+    "timezone": "Asia/Shanghai"
+  },
+  "scheduler": {
+    "interval_minutes": 60,
+    "worker_concurrency": 1,
+    "max_attempts": 3
+  },
+  "search": {
+    "keyword_enabled": true,
+    "hybrid_enabled": false,
+    "default_limit": 20,
+    "max_limit": 100
+  },
+  "models": {
+    "generation_enabled": false,
+    "embedding_enabled": false,
+    "provider": null,
+    "model": null,
+    "credential_env": "MODEL_API_KEY",
+    "daily_budget_usd": 0
+  },
+  "vault": {
+    "write_enabled": false,
+    "root": null,
+    "allowed_generated_paths": [],
+    "personal_notes_index_enabled": false
+  }
+}

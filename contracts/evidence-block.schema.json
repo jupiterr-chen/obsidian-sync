@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Immutable evidence block v1",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "source",
+    "doc_id",
+    "source_version",
+    "source_sha256",
+    "extraction_id",
+    "block_id",
+    "block_type",
+    "text",
+    "locator",
+    "quality"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1
+    },
+    "doc_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "extraction_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "block_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "block_type": {
+      "enum": [
+        "paragraph",
+        "heading",
+        "table",
+        "caption",
+        "footnote"
+      ]
+    },
+    "text": {
+      "type": "string"
+    },
+    "locator": {
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "pdf",
+            "html",
+            "image",
+            "text"
+          ]
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "coordinate_system": {
+          "type": "string"
+        },
+        "dom_path": {
+          "type": "string"
+        },
+        "anchor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_char": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_char": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "pdf"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "page"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "html",
+                  "text"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "start_char",
+              "end_char"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "html"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "dom_path"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "bbox"
+            ]
+          },
+          "then": {
+            "required": [
+              "coordinate_system"
+            ]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "quality": {
+      "type": "object",
+      "required": [
+        "status",
+        "issues"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ready",
+            "review",
+            "failed"
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
