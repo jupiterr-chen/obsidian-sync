@@ -99,6 +99,37 @@ CREATE TABLE IF NOT EXISTS sync_runs (
     jobs_registered INTEGER NOT NULL DEFAULT 0,
     error TEXT
 );
+CREATE TABLE IF NOT EXISTS extractions (
+    extraction_id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    snapshot_sha256 TEXT NOT NULL,
+    parser_id TEXT NOT NULL,
+    parser_version TEXT NOT NULL,
+    config_digest TEXT NOT NULL,
+    status TEXT NOT NULL,
+    issues_json TEXT NOT NULL DEFAULT '[]',
+    stats_json TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (source, doc_id, version_id, parser_id, parser_version, config_digest),
+    FOREIGN KEY (source, doc_id, version_id)
+        REFERENCES kb_versions(source, doc_id, version_id)
+);
+CREATE INDEX IF NOT EXISTS idx_extractions_version
+    ON extractions(source, doc_id, version_id);
+CREATE TABLE IF NOT EXISTS blocks (
+    block_id TEXT PRIMARY KEY,
+    extraction_id TEXT NOT NULL REFERENCES extractions(extraction_id),
+    ordinal INTEGER NOT NULL,
+    block_type TEXT NOT NULL,
+    text TEXT NOT NULL,
+    locator_json TEXT NOT NULL,
+    quality_status TEXT NOT NULL,
+    quality_issues_json TEXT NOT NULL DEFAULT '[]',
+    UNIQUE (extraction_id, ordinal)
+);
+CREATE INDEX IF NOT EXISTS idx_blocks_extraction ON blocks(extraction_id);
 """
 
 JOB_PENDING = "pending"
@@ -378,6 +409,133 @@ class KnowledgeStore:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------ sync runs
+    def has_extraction(self, extraction_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM extractions WHERE extraction_id=?",
+                (extraction_id,)).fetchone()
+        return row is not None
+
+    def record_extraction(self, extraction: Dict[str, Any],
+                          blocks: List[Dict[str, Any]]) -> bool:
+        """Insert an extraction with its blocks atomically; no-op when present.
+
+        Returns True when newly recorded. An existing extraction_id is never
+        rewritten: re-extraction with different input must produce a different
+        extraction_id by construction.
+        """
+        now = utc_now()
+        with self._tx() as conn:
+            existing = conn.execute(
+                "SELECT 1 FROM extractions WHERE extraction_id=?",
+                (extraction["extraction_id"],)).fetchone()
+            if existing:
+                return False
+            conn.execute(
+                "INSERT INTO extractions (extraction_id, source, doc_id, version_id,"
+                " snapshot_sha256, parser_id, parser_version, config_digest,"
+                " status, issues_json, stats_json, created_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    extraction["extraction_id"], extraction["source"],
+                    extraction["doc_id"], extraction["version_id"],
+                    extraction["snapshot_sha256"], extraction["parser_id"],
+                    extraction["parser_version"], extraction["config_digest"],
+                    extraction["status"],
+                    json.dumps(extraction.get("issues") or [], ensure_ascii=False),
+                    json.dumps(extraction.get("stats") or {}, ensure_ascii=False),
+                    now,
+                ),
+            )
+            for ordinal, block in enumerate(blocks):
+                conn.execute(
+                    "INSERT INTO blocks (block_id, extraction_id, ordinal, block_type,"
+                    " text, locator_json, quality_status, quality_issues_json)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        "%s-b%04d" % (extraction["extraction_id"], ordinal),
+                        extraction["extraction_id"], ordinal,
+                        block["block_type"], block["text"],
+                        json.dumps(block["locator"], ensure_ascii=False),
+                        block["quality"]["status"],
+                        json.dumps(block["quality"].get("issues") or [],
+                                   ensure_ascii=False),
+                    ),
+                )
+        return True
+
+    def get_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM extractions WHERE extraction_id=?",
+                (extraction_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["issues"] = json.loads(result.pop("issues_json") or "[]")
+        result["stats"] = json.loads(result.pop("stats_json") or "{}")
+        return result
+
+    def latest_extraction(self, source: str, doc_id: str,
+                          version_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM extractions WHERE source=? AND doc_id=? AND version_id=?"
+                " ORDER BY created_at DESC, extraction_id LIMIT 1",
+                (source, doc_id, version_id)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["issues"] = json.loads(result.pop("issues_json") or "[]")
+        result["stats"] = json.loads(result.pop("stats_json") or "{}")
+        return result
+
+    def get_blocks(self, extraction_id: str) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM blocks WHERE extraction_id=? ORDER BY ordinal",
+                (extraction_id,)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["locator"] = json.loads(item.pop("locator_json") or "{}")
+            item["quality"] = {
+                "status": item.pop("quality_status"),
+                "issues": json.loads(item.pop("quality_issues_json") or "[]"),
+            }
+            result.append(item)
+        return result
+
+    def get_block_with_identity(self, block_id: str) -> Optional[Dict[str, Any]]:
+        """Block joined with its extraction identity, ready for evidence export."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT b.block_id, b.ordinal, b.block_type, b.text, b.locator_json,"
+                " b.quality_status, b.quality_issues_json,"
+                " e.extraction_id, e.source, e.doc_id, e.version_id, e.snapshot_sha256"
+                " FROM blocks b JOIN extractions e ON e.extraction_id = b.extraction_id"
+                " WHERE b.block_id=?", (block_id,)).fetchone()
+        if not row:
+            return None
+        item = dict(row)
+        item["locator"] = json.loads(item.pop("locator_json") or "{}")
+        item["quality"] = {
+            "status": item.pop("quality_status"),
+            "issues": json.loads(item.pop("quality_issues_json") or "[]"),
+        }
+        return item
+
+    def snapshots_missing_extract_jobs(self, stage_digest: str) -> List[Dict[str, Any]]:
+        """Snapshot bindings that have no extract job for this stage digest."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT s.source, s.doc_id, s.version_id, s.sha256 FROM snapshots s"
+                " WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.source=s.source"
+                " AND j.doc_id=s.doc_id AND j.version_id=s.version_id"
+                " AND j.stage='extract' AND j.config_digest=?)", (stage_digest,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def start_sync_run(self) -> int:
         with self._tx() as conn:
             cur = conn.execute(

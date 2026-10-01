@@ -163,7 +163,8 @@ class MeasurementRow:
 
 def measure_snapshot(row: Dict[str, Any], blob_path: str,
                      counter_name: str = "heuristic") -> MeasurementRow:
-    """Measure one sampled version from its snapshot file."""
+    """Measure one sampled version from its snapshot via the extractor registry."""
+    from .extract import get_extractor
     from .sampling import format_of
 
     fmt = format_of(row.get("media_type"), row.get("ext"))
@@ -174,25 +175,27 @@ def measure_snapshot(row: Dict[str, Any], blob_path: str,
     with open(blob_path, "rb") as handle:
         raw = handle.read()
 
-    if fmt == "txt":
-        text, encoding = decode_text(raw)
-        out.encoding = encoding
-    elif fmt == "html":
-        text, encoding = extract_html_text(raw)
-        out.encoding = encoding
-    elif fmt == "img":
+    try:
+        extractor = get_extractor(fmt)
+    except Exception as exc:
         out.status = "not_extracted"
-        out.status_detail = "image OCR is P2 scope"
+        out.status_detail = "%s" % exc
         return out
-    elif fmt == "pdf":
-        pages, method = pdf_page_count(raw)
-        out.pages, out.page_method = pages, method
-        out.status = "not_extracted"
-        out.status_detail = "pdf body extraction is P2 scope (parser not selected)"
-        return out
+    result = extractor(raw)
+    out.page_method = result.parser_id
+    if fmt == "pdf":
+        out.pages = result.stats.get("pages")
+    if result.blocks:
+        text = "\n".join(block.text for block in result.blocks)
+        out.encoding = result.stats.get("encoding")
+        out.extras["extract_status"] = result.status
+        out.extras["extract_issues"] = result.issues
     else:
         out.status = "not_extracted"
-        out.status_detail = "unknown format"
+        out.status_detail = ";".join(result.issues) or (
+            "extraction produced no blocks (status %s)" % result.status)
+        if fmt == "pdf":
+            out.page_method = "%s:%s" % (result.parser_id, "pages-only")
         return out
 
     out.text_chars = len(text)

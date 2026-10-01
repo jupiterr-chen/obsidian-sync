@@ -17,10 +17,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="knowledge", description="Research KB knowledge layer")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("sync", "run-snapshots", "status", "sample", "measure"):
+    for name in ("sync", "run-snapshots", "run-extracts", "status", "sample", "measure"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
-        if name == "run-snapshots":
+        if name in ("run-snapshots", "run-extracts"):
             child.add_argument("--limit", type=int, default=None,
                                help="process at most N jobs in this run")
         if name in ("sample", "measure"):
