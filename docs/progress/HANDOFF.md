@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-- M0 已完成并验收（`docs/progress/m0-report.md`），准备提交并推送 obsidian-sync.git（commit 见下方提交后更新）。
+- M0 已完成并验收（`docs/progress/m0-report.md`），已提交 `0f3a19f` 并推送 obsidian-sync.git。
 - 主分支 main，远端唯一 `git@github.com:jupiterr-chen/obsidian-sync.git`。
 - 源工程 `D:\2.Develop\7.zcode\discord-export\research-kb` 未改动、保留；基线 commit `5442e397`。
 - 无启动中的进程/服务/后台任务；无未完成测试（两侧 113 OK, 1 skipped）。
