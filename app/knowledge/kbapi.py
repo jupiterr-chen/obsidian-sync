@@ -1,0 +1,425 @@
+"""/api/kb/v1 HTTP service (P3-02, docs/04 contract).
+
+Runs on its own port, separate from the first-layer library service whose
+/api/v1 behavior is untouched. Every endpoint requires a bearer token with
+the right permission scope (research.read for data, admin.jobs for ops).
+Tokens come from the knowledge config file / environment - never from the
+repo. The server is read-only against the knowledge store except for job
+ops which are guarded by admin.jobs.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import os
+import traceback
+import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, unquote, urlparse
+
+from .extract import to_evidence_block
+from .indexing import MAX_QUERY_CHARS, SearchFilters, search, snippet_for
+from .schema import validate_evidence_block
+from .store import KnowledgeStore
+
+PERM_READ = "research.read"
+PERM_ADMIN_JOBS = "admin.jobs"
+
+
+class KbApiError(Exception):
+    def __init__(self, status: int, code: str, message: str,
+                 retryable: bool = False):
+        super().__init__(message)
+        self.status = status
+        self.code = code
+        self.message = message
+        self.retryable = retryable
+
+
+def encode_cursor(payload: Dict[str, Any]) -> str:
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_cursor(cursor: str) -> Dict[str, Any]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+    except Exception:
+        raise KbApiError(400, "invalid_cursor", "cursor is not decodable")
+
+
+class KbApi:
+    """Request handling logic, transport-agnostic for testability."""
+
+    def __init__(self, kb: KnowledgeStore, tokens: Dict[str, List[str]]):
+        self.kb = kb
+        self.tokens = tokens
+
+    def authenticate(self, bearer: Optional[str], permission: str) -> str:
+        if not bearer:
+            raise KbApiError(401, "unauthenticated", "missing bearer token")
+        for token, perms in self.tokens.items():
+            if token == bearer and permission in perms:
+                return permission
+        raise KbApiError(403, "forbidden", "token lacks %s" % permission)
+
+    # ------------------------------------------------------------- handlers
+    def health(self) -> Dict[str, Any]:
+        return {"status": "ok"}
+
+    def ready(self) -> Dict[str, Any]:
+        generation = self.kb.active_generation()
+        return {"ready": generation is not None,
+                "generation_id": generation["generation_id"] if generation else None}
+
+    def do_search(self, body: Dict[str, Any], limit_default: int = 20) -> Dict[str, Any]:
+        request_id = "req-" + uuid.uuid4().hex[:16]
+        query = body.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise KbApiError(400, "invalid_query", "query must be a non-empty string")
+        if len(query) > MAX_QUERY_CHARS:
+            raise KbApiError(400, "invalid_query",
+                             "query longer than %d characters" % MAX_QUERY_CHARS)
+        mode = body.get("mode", "keyword")
+        if mode != "keyword":
+            raise KbApiError(422, "mode_unavailable",
+                             "mode %r is not enabled in this deployment" % mode)
+        raw_filters = body.get("filters") or {}
+        if not isinstance(raw_filters, dict):
+            raise KbApiError(400, "invalid_filters", "filters must be an object")
+        if raw_filters.get("collections") not in (None, ["source_documents"]):
+            raise KbApiError(403, "forbidden",
+                             "no accessible collections match the filter")
+        filters = SearchFilters(
+            sources=raw_filters.get("sources"),
+            symbols=raw_filters.get("symbols"),
+            doc_types=raw_filters.get("doc_types"),
+            date_from=raw_filters.get("date_from"),
+            date_to=raw_filters.get("date_to"),
+            as_of=raw_filters.get("as_of"),
+            as_of_mode=raw_filters.get("as_of_mode", "system"),
+        )
+        if filters.as_of_mode not in ("system", "public"):
+            raise KbApiError(400, "invalid_filters", "as_of_mode must be system|public")
+        limit = body.get("limit", limit_default)
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+            raise KbApiError(400, "invalid_limit", "limit must be 1..100")
+        cursor = body.get("cursor")
+        offset = 0
+        if cursor:
+            decoded = decode_cursor(cursor)
+            digest = self._query_digest(query, raw_filters)
+            if decoded.get("digest") != digest:
+                raise KbApiError(409, "cursor_expired",
+                                 "cursor belongs to a different query")
+            active = self.kb.active_generation()
+            if active and decoded.get("generation") != active["generation_id"]:
+                raise KbApiError(409, "cursor_expired",
+                                 "index generation changed since the cursor was issued")
+            offset = int(decoded.get("offset", 0))
+
+        result = search(self.kb, query, filters, limit=limit + 1)
+        if not result.get("ok"):
+            raise KbApiError(503, "not_ready", result.get("error", "not ready"))
+        hits = result["hits"]
+        page = hits[offset:offset + limit]
+        next_cursor = None
+        if offset + limit < len(hits):
+            next_cursor = encode_cursor({
+                "digest": self._query_digest(query, raw_filters),
+                "generation": result["generation_id"],
+                "offset": offset + limit,
+            })
+        normalized = {k: v for k, v in raw_filters.items() if v}
+        return {
+            "request_id": request_id,
+            "generation_id": result["generation_id"],
+            "normalized_filters": normalized,
+            "hits": [self._hit_to_json(hit) for hit in page],
+            "next_cursor": next_cursor,
+        }
+
+    def _query_digest(self, query: str, filters: Dict[str, Any]) -> str:
+        canonical = json.dumps({"q": query, "f": filters}, ensure_ascii=False,
+                               sort_keys=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+    def _hit_to_json(self, hit) -> Dict[str, Any]:
+        block = hit.block
+        evidence = to_evidence_block(block)
+        text, _spans = snippet_for(block["text"], hit.matched_terms)
+        return {
+            "schema_version": "1",
+            "source": block["source"],
+            "doc_id": block["doc_id"],
+            "source_version": block["version_id"],
+            "source_sha256": block["snapshot_sha256"],
+            "extraction_id": block["extraction_id"],
+            "block_id": block["block_id"],
+            "block_type": block["block_type"],
+            "text": block["text"],
+            "snippet": text,
+            "locator": block["locator"],
+            "quality": block["quality"],
+            "evidence_url": "/api/kb/v1/evidence/%s" % block["block_id"],
+            "source_version_url": "/api/kb/v1/documents/%s/%s/versions/%s" % (
+                block["source"], block["doc_id"], block["version_id"]),
+            "score_kind": hit.score_kind,
+            "score": hit.score,
+        }
+
+    def document(self, source: str, doc_id: str) -> Dict[str, Any]:
+        with self.kb._lock:
+            doc = self.kb._conn.execute(
+                "SELECT * FROM kb_documents WHERE source=? AND doc_id=?",
+                (source, doc_id)).fetchone()
+            versions = self.kb._conn.execute(
+                "SELECT version_id, sha256, bytes, media_type, ext, is_current,"
+                " state FROM kb_versions WHERE source=? AND doc_id=?"
+                " ORDER BY is_current DESC, version_id",
+                (source, doc_id)).fetchall()
+        if doc is None:
+            raise KbApiError(404, "not_found", "document not found")
+        result = dict(doc)
+        result["available"] = bool(result.pop("available"))
+        version_list = []
+        for v in versions:
+            v = dict(v)
+            v["is_current"] = bool(v["is_current"])
+            extraction = self.kb.latest_extraction(source, doc_id, v["version_id"])
+            v["extraction_status"] = extraction["status"] if extraction else None
+            v["extraction_id"] = extraction["extraction_id"] if extraction else None
+            version_list.append(v)
+        result["versions"] = version_list
+        return result
+
+    def document_version(self, source: str, doc_id: str, version_id: str) -> Dict[str, Any]:
+        doc = self.document(source, doc_id)
+        for version in doc["versions"]:
+            if version["version_id"] == version_id:
+                return {"source": source, "doc_id": doc_id, "version": version,
+                        "document": {k: doc[k] for k in
+                                     ("title", "display_title", "market", "symbol",
+                                      "doc_type", "report_period", "filing_date",
+                                      "published_at", "report_date", "first_seen_at")}}
+        raise KbApiError(404, "not_found", "version not found")
+
+    def evidence(self, block_id: str) -> Dict[str, Any]:
+        row = self.kb.get_block_with_identity(block_id)
+        if row is None:
+            raise KbApiError(404, "not_found", "evidence block not found")
+        evidence = to_evidence_block(row)
+        errors = validate_evidence_block(evidence)
+        if errors:  # never serve an invalid evidence block
+            raise KbApiError(500, "invalid_evidence",
+                             "stored block fails its contract")
+        siblings = self.kb.get_blocks(row["extraction_id"])
+        index = next(i for i, b in enumerate(siblings) if b["block_id"] == block_id)
+        context_before = [b["text"] for b in siblings[max(0, index - 1):index]]
+        context_after = [b["text"] for b in siblings[index + 1:index + 2]]
+        return {
+            "evidence": evidence,
+            "context": {"before": context_before, "after": context_after},
+            "source_version_url": "/api/kb/v1/documents/%s/%s/versions/%s" % (
+                row["source"], row["doc_id"], row["version_id"]),
+        }
+
+    def extraction_blocks(self, extraction_id: str, cursor: Optional[str],
+                          limit: int = 50) -> Dict[str, Any]:
+        extraction = self.kb.get_extraction(extraction_id)
+        if extraction is None:
+            raise KbApiError(404, "not_found", "extraction not found")
+        offset = 0
+        if cursor:
+            decoded = decode_cursor(cursor)
+            if decoded.get("extraction_id") != extraction_id:
+                raise KbApiError(409, "cursor_expired", "cursor belongs elsewhere")
+            offset = int(decoded.get("offset", 0))
+        limit = max(1, min(int(limit), 200))
+        blocks = self.kb.get_blocks(extraction_id)
+        page = blocks[offset:offset + limit]
+        next_cursor = None
+        if offset + limit < len(blocks):
+            next_cursor = encode_cursor({"extraction_id": extraction_id,
+                                         "offset": offset + limit})
+        return {"extraction_id": extraction_id,
+                "status": extraction["status"],
+                "blocks": [to_evidence_block(dict(b, **{
+                    "source": extraction["source"], "doc_id": extraction["doc_id"],
+                    "version_id": extraction["version_id"],
+                    "snapshot_sha256": extraction["snapshot_sha256"],
+                })) for b in page],
+                "next_cursor": next_cursor}
+
+    def changes(self, cursor: Optional[str], limit: int = 100) -> Dict[str, Any]:
+        sequence = 0
+        if cursor:
+            try:
+                sequence = int(decode_cursor(cursor).get("sequence", 0))
+            except (TypeError, ValueError):
+                raise KbApiError(400, "invalid_cursor", "cursor has no sequence")
+        events = self.kb.events_after(sequence, limit=limit)
+        next_cursor = None
+        if len(events) == limit and events:
+            next_cursor = encode_cursor({"sequence": events[-1]["sequence"]})
+        return {"events": events, "next_cursor": next_cursor}
+
+    def create_analysis_run(self, _body: Dict[str, Any]) -> Dict[str, Any]:
+        raise KbApiError(422, "task_disabled",
+                         "analysis runs are not enabled in this deployment",
+                         retryable=False)
+
+
+def load_tokens(config_dict: Dict[str, Any]) -> Dict[str, List[str]]:
+    """Tokens from config; production injects via environment instead."""
+    tokens: Dict[str, List[str]] = {}
+    for token, perms in (config_dict.get("api_tokens") or {}).items():
+        tokens[str(token)] = [str(p) for p in perms]
+    env_token = os.environ.get("RESEARCHKB_KB_TOKEN")
+    if env_token:
+        tokens.setdefault(env_token, [PERM_READ])
+    return tokens
+
+
+class Handler(BaseHTTPRequestHandler):
+    api: KbApi = None  # type: ignore[assignment]
+    server_version = "ResearchKB-Knowledge/0.1"
+
+    def _send(self, status: int, payload: Dict[str, Any], head_only: bool = False) -> None:
+        body = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(body)
+
+    def _error(self, exc: KbApiError, head_only: bool = False) -> None:
+        self._send(exc.status, {
+            "error": {"code": exc.code, "message": exc.message,
+                      "request_id": "req-" + uuid.uuid4().hex[:16],
+                      "retryable": exc.retryable},
+        }, head_only)
+
+    def _parts(self) -> List[str]:
+        return [unquote(p) for p in urlparse(self.path).path.split("/") if p]
+
+    def _query(self) -> Dict[str, List[str]]:
+        return parse_qs(urlparse(self.path).query)
+
+    def _bearer(self) -> Optional[str]:
+        header = self.headers.get("Authorization") or ""
+        if header.lower().startswith("bearer "):
+            return header[7:].strip() or None
+        return None
+
+    def _dispatch(self, head_only: bool) -> None:
+        try:
+            parts = self._parts()
+            if not parts or parts[0] != "api":
+                raise KbApiError(404, "not_found", "not found")
+            if parts[1:2] != ["kb"] or parts[2:3] != ["v1"]:
+                raise KbApiError(404, "not_found", "unknown api prefix")
+            route = parts[3:]
+            if not route:
+                raise KbApiError(404, "not_found", "not found")
+
+            if route == ["health"]:
+                return self._send(200, self.api.health(), head_only)
+            if route == ["ready"]:
+                return self._send(200, self.api.ready(), head_only)
+
+            if route[:1] == ["search"] and self.command == "POST":
+                self.api.authenticate(self._bearer(), PERM_READ)
+                body = self._read_json_body()
+                return self._send(200, self.api.do_search(body), head_only)
+
+            if route[:1] == ["analysis-runs"] and self.command == "POST":
+                self.api.authenticate(self._bearer(), "analysis.run")
+                body = self._read_json_body()
+                try:
+                    payload = self.api.create_analysis_run(body)
+                    return self._send(200, payload, head_only)
+                except KbApiError as exc:
+                    return self._error(exc, head_only)
+
+            if route[:1] == ["documents"]:
+                self.api.authenticate(self._bearer(), PERM_READ)
+                if len(route) == 3:
+                    return self._send(200, self.api.document(route[1], route[2]),
+                                      head_only)
+                if len(route) == 6 and route[3] == "versions":
+                    return self._send(200, self.api.document_version(
+                        route[1], route[2], route[5]), head_only)
+                raise KbApiError(404, "not_found", "not found")
+
+            if route[:1] == ["evidence"] and len(route) == 2:
+                self.api.authenticate(self._bearer(), PERM_READ)
+                return self._send(200, self.api.evidence(route[1]), head_only)
+
+            if route[:1] == ["extractions"]:
+                self.api.authenticate(self._bearer(), PERM_READ)
+                if len(route) == 3 and route[2] == "blocks":
+                    cursor = (self._query().get("cursor") or [None])[0]
+                    limit = int((self._query().get("limit") or ["50"])[0])
+                    return self._send(200, self.api.extraction_blocks(
+                        route[1], cursor, limit), head_only)
+                raise KbApiError(404, "not_found", "not found")
+
+            if route[:1] == ["changes"] and len(route) == 1:
+                self.api.authenticate(self._bearer(), PERM_READ)
+                cursor = (self._query().get("cursor") or [None])[0]
+                limit = int((self._query().get("limit") or ["100"])[0])
+                return self._send(200, self.api.changes(cursor, limit), head_only)
+
+            raise KbApiError(404, "not_found", "not found")
+        except KbApiError as exc:
+            self._error(exc, head_only)
+        except BrokenPipeError:
+            pass
+        except Exception:
+            self._log_exception()
+            self._error(KbApiError(500, "internal_error", "internal error"), head_only)
+
+    def _read_json_body(self) -> Dict[str, Any]:
+        length = int(self.headers.get("Content-Length") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw.decode("utf-8") or "{}")
+        except ValueError:
+            raise KbApiError(400, "invalid_body", "request body is not JSON")
+        if not isinstance(body, dict):
+            raise KbApiError(400, "invalid_body", "request body must be an object")
+        return body
+
+    def _log_exception(self) -> None:
+        try:
+            print(traceback.format_exc())
+        except Exception:
+            pass
+
+    def do_GET(self) -> None:  # noqa: N802
+        self._dispatch(head_only=False)
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self._dispatch(head_only=True)
+
+    def do_POST(self) -> None:  # noqa: N802
+        self._dispatch(head_only=False)
+
+    def log_message(self, fmt, *args) -> None:
+        return
+
+
+def build_kb_server(kb: KnowledgeStore, tokens: Dict[str, List[str]],
+                    host: str = "127.0.0.1", port: int = 8766) -> ThreadingHTTPServer:
+    api = KbApi(kb, tokens)
+    handler = type("BoundKbHandler", (Handler,), {"api": api})
+    server = ThreadingHTTPServer((host, port), handler)
+    server.daemon_threads = True
+    return server

@@ -205,6 +205,13 @@ class JobRunner:
         }, blocks)
         if not recorded:  # pragma: no cover - guarded by has_extraction
             raise SnapshotError("extraction identity conflict")
+        self.kb.emit_event(
+            "extraction.completed", job["source"], job["doc_id"], job["version_id"],
+            {"extraction_id": extraction_id, "status": result.status,
+             "parser": "%s/%s" % (result.parser_id, result.parser_version),
+             "blocks": len(result.blocks),
+             "issues": result.issues[:10]},
+            event_id="evt-extr-" + extraction_id[:32])
         return extraction_id
 
     def status(self) -> Dict[str, Any]:

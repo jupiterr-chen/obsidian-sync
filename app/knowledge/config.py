@@ -23,6 +23,8 @@ class KnowledgeConfig:
     sync_batch_size: int = 500
     job_lease_seconds: int = 900
     job_max_attempts: int = 5
+    kb_bind_host: str = "127.0.0.1"
+    kb_bind_port: int = 8766
     extra: Dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -32,6 +34,7 @@ class KnowledgeConfig:
             raise KnowledgeConfigError("'register_stages' must be a non-empty list")
         sync = data.get("sync") or {}
         jobs = data.get("jobs") or {}
+        api = data.get("api") or {}
         return cls(
             catalog_db=str(data.get("catalog_db", "catalog/catalog.sqlite3")),
             knowledge_db=str(data.get("knowledge_db", "state/knowledge.sqlite3")),
@@ -41,9 +44,12 @@ class KnowledgeConfig:
             sync_batch_size=max(1, int(sync.get("batch_size", 500))),
             job_lease_seconds=max(30, int(jobs.get("lease_seconds", 900))),
             job_max_attempts=max(1, int(jobs.get("max_attempts", 5))),
+            kb_bind_host=str(api.get("bind_host", "127.0.0.1")),
+            kb_bind_port=int(api.get("bind_port", 8766)),
             extra={k: v for k, v in data.items()
                    if k not in ("catalog_db", "knowledge_db", "snapshot_root",
-                                "library_config", "register_stages", "sync", "jobs")},
+                                "library_config", "register_stages", "sync", "jobs",
+                                "api")},
         )
 
     @classmethod

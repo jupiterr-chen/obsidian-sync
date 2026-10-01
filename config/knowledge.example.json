@@ -3,12 +3,19 @@
   "knowledge_db": "state/knowledge.sqlite3",
   "snapshot_root": "state/snapshots",
   "library_config": "config/config.json",
-  "register_stages": ["snapshot"],
+  "register_stages": ["snapshot", "extract"],
   "sync": {
     "batch_size": 500
   },
   "jobs": {
     "lease_seconds": 900,
     "max_attempts": 5
+  },
+  "api": {
+    "bind_host": "127.0.0.1",
+    "bind_port": 8766
+  },
+  "api_tokens": {
+    "REPLACE_WITH_GENERATED_TOKEN": ["research.read"]
   }
 }

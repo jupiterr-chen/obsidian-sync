@@ -123,10 +123,17 @@ class SyncService:
         doc_stats = self.kb.upsert_documents([doc], synced_at)
         stats["documents"] += 1
         stats["new_documents"] += doc_stats["new_documents"]
+        if doc_stats["new_documents"]:
+            self.kb.emit_event("document.discovered", doc["source"], doc["doc_id"],
+                               None, {"title": doc.get("display_title") or doc.get("title")})
         if versions:
             ver_stats = self.kb.upsert_versions(versions, synced_at)
             stats["versions"] += ver_stats["versions"]
             stats["new_versions"] += ver_stats["new_versions"]
+            for row in ver_stats["new_version_rows"]:
+                self.kb.emit_event("version.registered", row["source"], row["doc_id"],
+                                   row["version_id"],
+                                   {"state": row.get("state"), "sha256": row.get("sha256")})
         source_stats = stats["sources"].setdefault(doc["source"], {
             "documents": 0, "versions": 0, "snapshot_jobs_registered": 0})
         source_stats["documents"] += 1

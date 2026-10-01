@@ -15,7 +15,7 @@ import sqlite3
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS kb_documents (
@@ -130,6 +130,41 @@ CREATE TABLE IF NOT EXISTS blocks (
     UNIQUE (extraction_id, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_extraction ON blocks(extraction_id);
+CREATE TABLE IF NOT EXISTS index_generations (
+    generation_id TEXT PRIMARY KEY,
+    manifest_hash TEXT NOT NULL,
+    status TEXT NOT NULL,             -- building | active | retired
+    stats_json TEXT,
+    created_at TEXT NOT NULL,
+    activated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS index_postings (
+    generation_id TEXT NOT NULL REFERENCES index_generations(generation_id),
+    term TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    tf INTEGER NOT NULL,
+    PRIMARY KEY (generation_id, term, block_id)
+);
+CREATE INDEX IF NOT EXISTS idx_postings_term
+    ON index_postings(generation_id, term);
+CREATE TABLE IF NOT EXISTS index_doc_terms (
+    generation_id TEXT NOT NULL REFERENCES index_generations(generation_id),
+    block_id TEXT NOT NULL,
+    terms INTEGER NOT NULL,
+    length INTEGER NOT NULL,
+    PRIMARY KEY (generation_id, block_id)
+);
+CREATE TABLE IF NOT EXISTS kb_events (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT NOT NULL UNIQUE,
+    event_type TEXT NOT NULL,
+    source TEXT,
+    doc_id TEXT,
+    version_id TEXT,
+    occurred_at TEXT NOT NULL,
+    payload_version INTEGER NOT NULL DEFAULT 1,
+    payload_json TEXT
+);
 """
 
 JOB_PENDING = "pending"
@@ -230,9 +265,10 @@ class KnowledgeStore:
                 )
         return {"documents": len(rows), "new_documents": new_documents}
 
-    def upsert_versions(self, rows: List[Dict[str, Any]], synced_at: str) -> Dict[str, int]:
+    def upsert_versions(self, rows: List[Dict[str, Any]], synced_at: str) -> Dict[str, Any]:
         """Idempotent mirror of catalog versions; identity columns never change."""
         new_versions = 0
+        new_rows: List[Dict[str, Any]] = []
         with self._tx() as conn:
             for row in rows:
                 exists = conn.execute(
@@ -241,6 +277,7 @@ class KnowledgeStore:
                 ).fetchone()
                 if not exists:
                     new_versions += 1
+                    new_rows.append(row)
                 conn.execute(
                     "INSERT INTO kb_versions ("
                     " source, doc_id, version_id, sha256, bytes, media_type, ext, rel_path,"
@@ -257,7 +294,8 @@ class KnowledgeStore:
                         row.get("content_changed_at"), synced_at,
                     ),
                 )
-        return {"versions": len(rows), "new_versions": new_versions}
+        return {"versions": len(rows), "new_versions": new_versions,
+                "new_version_rows": new_rows}
 
     # ------------------------------------------------------------ snapshots
     def record_blob(self, sha256: str, size: int, store_path: str, created_at: str) -> None:
@@ -409,6 +447,190 @@ class KnowledgeStore:
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------ sync runs
+    # ------------------------------------------------------- index generations
+    def create_generation(self, generation_id: str, manifest_hash: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO index_generations (generation_id, manifest_hash, status,"
+                " stats_json, created_at) VALUES (?,?,?,?,?)",
+                (generation_id, manifest_hash, "building", None, utc_now()),
+            )
+
+    def active_generation(self) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM index_generations WHERE status='active'"
+                " ORDER BY activated_at DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["stats"] = json.loads(result.pop("stats_json") or "{}")
+        return result
+
+    def get_generation(self, generation_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM index_generations WHERE generation_id=?",
+                (generation_id,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["stats"] = json.loads(result.pop("stats_json") or "{}")
+        return result
+
+    def activate_generation(self, generation_id: str, stats: Dict[str, Any]) -> None:
+        """Atomically publish one generation and retire any previous active."""
+        with self._tx() as conn:
+            current = conn.execute(
+                "SELECT generation_id FROM index_generations WHERE status='active'"
+            ).fetchone()
+            if current and current["generation_id"] == generation_id:
+                return
+            conn.execute(
+                "UPDATE index_generations SET status='retired' WHERE status='active'")
+            conn.execute(
+                "UPDATE index_generations SET status='active', activated_at=?,"
+                " stats_json=? WHERE generation_id=?",
+                (utc_now(), json.dumps(stats, ensure_ascii=False), generation_id),
+            )
+
+    def write_postings(self, generation_id: str,
+                       postings: List[Tuple[str, str, int]],
+                       doc_terms: List[Tuple[str, int, int]]) -> None:
+        with self._tx() as conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO index_postings (generation_id, term, block_id, tf)"
+                " VALUES (?,?,?,?)",
+                [(generation_id, term, block_id, tf) for term, block_id, tf in postings],
+            )
+            conn.executemany(
+                "INSERT OR REPLACE INTO index_doc_terms (generation_id, block_id,"
+                " terms, length) VALUES (?,?,?,?)",
+                [(generation_id, block_id, terms, length)
+                 for block_id, terms, length in doc_terms],
+            )
+
+    def postings_for_terms(self, generation_id: str,
+                           terms: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        placeholders = ",".join("?" for _ in terms)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT term, block_id, tf FROM index_postings"
+                " WHERE generation_id=? AND term IN (%s)" % placeholders,
+                (generation_id, *terms),
+            ).fetchall()
+        result: Dict[str, List[Dict[str, Any]]] = {}
+        for row in rows:
+            result.setdefault(row["term"], []).append(
+                {"block_id": row["block_id"], "tf": row["tf"]})
+        return result
+
+    def doc_term_stats(self, generation_id: str) -> Dict[str, int]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) blocks, COALESCE(SUM(terms),0) terms,"
+                " COALESCE(SUM(length),0) length FROM index_doc_terms"
+                " WHERE generation_id=?",
+                (generation_id,)).fetchone()
+        return {"blocks": row["blocks"], "terms": row["terms"],
+                "total_length": row["length"]}
+
+    def block_lengths(self, generation_id: str,
+                      block_ids: List[str]) -> Dict[str, int]:
+        if not block_ids:
+            return {}
+        placeholders = ",".join("?" for _ in block_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT block_id, length FROM index_doc_terms"
+                " WHERE generation_id=? AND block_id IN (%s)" % placeholders,
+                (generation_id, *block_ids),
+            ).fetchall()
+        return {row["block_id"]: row["length"] for row in rows}
+
+    def blocks_by_ids(self, block_ids: List[str]) -> List[Dict[str, Any]]:
+        if not block_ids:
+            return []
+        placeholders = ",".join("?" for _ in block_ids)
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT b.block_id, b.ordinal, b.block_type, b.text, b.locator_json,"
+                " b.quality_status, b.quality_issues_json,"
+                " e.extraction_id, e.source, e.doc_id, e.version_id, e.snapshot_sha256,"
+                " e.status AS extraction_status"
+                " FROM blocks b JOIN extractions e ON e.extraction_id = b.extraction_id"
+                " WHERE b.block_id IN (%s)" % placeholders,
+                block_ids,
+            ).fetchall()
+        ordered = []
+        by_id = {}
+        for row in rows:
+            item = dict(row)
+            item["locator"] = json.loads(item.pop("locator_json") or "{}")
+            item["quality"] = {
+                "status": item.pop("quality_status"),
+                "issues": json.loads(item.pop("quality_issues_json") or "[]"),
+            }
+            by_id[item["block_id"]] = item
+        for block_id in block_ids:
+            if block_id in by_id:
+                ordered.append(by_id[block_id])
+        return ordered
+
+    def searchable_block_ids(self, generation_id: str) -> int:
+        with self._lock:
+            return self._conn.execute(
+                "SELECT COUNT(*) FROM index_doc_terms WHERE generation_id=?",
+                (generation_id,)).fetchone()[0]
+
+    def retire_orphan_generations(self) -> int:
+        """Retire 'building' generations left over by interrupted rebuilds."""
+        with self._tx() as conn:
+            cur = conn.execute(
+                "UPDATE index_generations SET status='retired'"
+                " WHERE status='building'")
+            return cur.rowcount
+
+    # ------------------------------------------------------------- kb events
+    def emit_event(self, event_type: str, source: Optional[str], doc_id: Optional[str],
+                   version_id: Optional[str], payload: Optional[Dict[str, Any]] = None,
+                   payload_version: int = 1, event_id: Optional[str] = None) -> str:
+        if event_id is None:
+            identity = "\x00".join((event_type, str(source), str(doc_id),
+                                    str(version_id), json.dumps(payload or {},
+                                                                sort_keys=True)))
+            event_id = "evt-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+        with self._tx() as conn:
+            conn.execute(
+                "INSERT INTO kb_events (event_id, event_type, source, doc_id,"
+                " version_id, occurred_at, payload_version, payload_json)"
+                " VALUES (?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(event_id) DO NOTHING",
+                (event_id, event_type, source, doc_id, version_id, utc_now(),
+                 payload_version, json.dumps(payload or {}, ensure_ascii=False)),
+            )
+        return event_id
+
+    def events_after(self, sequence: int, limit: int = 100) -> List[Dict[str, Any]]:
+        limit = max(1, min(int(limit), 500))
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM kb_events WHERE sequence > ? ORDER BY sequence LIMIT ?",
+                (sequence, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            result.append(item)
+        return result
+
+    def latest_event_sequence(self) -> int:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(sequence),0) s FROM kb_events").fetchone()
+        return row["s"]
+
     def has_extraction(self, extraction_id: str) -> bool:
         with self._lock:
             row = self._conn.execute(

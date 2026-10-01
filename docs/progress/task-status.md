@@ -16,7 +16,10 @@
 |P2-03 HTML/图片/文本解析|accepted（源码+合成）|main-agent|P1-02|见P2提交|docs/progress/p2-report.md|无|XBRL适配器P3+|
 |P2-04 表格和数值口径|accepted（基线+单测）/A09真实门禁BLOCKED|main-agent|P2-01|见P2提交|docs/progress/p2-report.md|真实标注样本|样本后迭代|
 |P2-05 不可变提取产物、块与配置版本|accepted（源码+合成）|main-agent|P2-01/02/03|见P2提交|docs/progress/p2-report.md|无|已完成|
-|P3-01..04 词法检索/API/影子回填/卡片链接|todo|main-agent|P2-05|—|—|生产全量验收需服务器|离线实现先行|
+|P3-01 中英文词法及筛选|accepted（源码+合成）/A10真实基准NOT_RUN|main-agent|P2-05|见P3提交|docs/progress/p3-report.md|真实语料|真实50查询基准待源访问|
+|P3-02 HTTP服务、鉴权、分页、事件|accepted（源码+合成）|main-agent|P3-01|见P3提交|docs/progress/p3-report.md|生产部署|部署后A21性能实测|
+|P3-03 影子全量回填与原子发布|accepted（工具）/生产BLOCKED|main-agent|P2/P3-01|见P3提交|docs/progress/p3-report.md|服务器+真实523基线|源访问后执行A14对账|
+|P3-04 卡片证据链接集成|accepted（源码+合成，不写Vault）|main-agent|P3-02/03|见P3提交|docs/progress/p3-report.md|真实Vault写回授权|P5/P6决定写回路径|
 |P4-01..03 embedding/混合检索/分析|todo|main-agent|P3|—|—|供应商/凭据/预算未定|默认关闭，mock协议测试|
 |P5-01..03 记忆/影响分析/写回|todo|main-agent|P4|—|—|真实写回授权|离线状态机先行|
 |P6-01..03 调度监控/备份恢复/应用接入|todo|main-agent|P3|—|—|生产主机访问|部署配置与演练工具可先行|
@@ -26,3 +29,4 @@
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。
 - 2026-10-01：P1 完成（离线）。app/knowledge（store/snapshot/sync/jobs/sampling/measure + CLI），ADR0003；134 测试全过（113 回归不变+21 新增）。A01/A04/A05 真实部分 BLOCKED：真实源访问、真实 tokenizer 未具备。
 - 2026-10-01：P2 完成（离线）。ADR0004 + extract/quality/tables/schema 模块；提取器注册表（txt/html/pdf/img 标准库实现）；不可变 extractions/blocks 对齐 evidence-block 契约；153 测试全过。真实 A06-A09 盲测/OCR/财务门禁 BLOCKED（解析器选型、OCR 引擎、真实样本未具备）。
+- 2026-10-01：P3 完成（离线）。indexing/kbapi/cards + 事件流；/api/kb/v1 全路由与鉴权（ADR0005，独立端口）；影子索引原子发布；171 测试全过。A10 真实基准/A14 生产对账/A21 性能 BLOCKED（真实语料与服务器未具备）。
