@@ -1,0 +1,31 @@
+# Keep the build context minimal and free of private material.
+# Only `app/` and config examples are needed to build the image.
+.git
+.gitignore
+.gitattributes
+.dockerignore
+opencode.json
+AGENTS.md
+.env
+.env.*
+config/config.json
+config/.env
+catalog
+state
+runtime
+data
+artifacts
+logs
+backups
+vault
+tools
+docs
+src
+contracts
+tests
+deploy
+**/__pycache__
+**/*.pyc
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm

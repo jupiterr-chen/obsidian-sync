@@ -1,0 +1,493 @@
+{
+  "m0_import": {
+    "source_repo": "research-kb (local path D:/2.Develop/7.zcode/discord-export/research-kb, remote untouched)",
+    "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+    "source_tracked_files": 52,
+    "generated": "2026-10-01",
+    "test_baseline": {
+      "old_repo": "113 tests OK, 1 skipped",
+      "main_repo_after_import": "113 tests OK, 1 skipped"
+    }
+  },
+  "copied_files": [
+    {
+      "source_path": "Dockerfile",
+      "target_path": "Dockerfile",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "09f5f082207f7eb079219d0fed3e2f52e8ac82c7",
+      "source_sha256": "91c56fb66145c81dd5a7e50bd343b951490e86074169b88de87002a0432ae035",
+      "target_sha256": "91c56fb66145c81dd5a7e50bd343b951490e86074169b88de87002a0432ae035",
+      "adaptations": []
+    },
+    {
+      "source_path": "README.md",
+      "target_path": "docs/legacy/README.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "d0b90e856c49e9853fe6b1d9e560d879bf8a8246",
+      "source_sha256": "553e88c11c31d1ba1a8aeef8a2f33ec1446d83de080b5ff0339ee0fd50be9b85",
+      "target_sha256": "867278bdf06d94e503ed116617f393e2480eefe9a086b5425a32f321172f0212",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "app/library/__init__.py",
+      "target_path": "app/library/__init__.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "52559f618a343babdca2330d3d2c5a9d0b48adce",
+      "source_sha256": "611936da4d4b89caafe570f450d874e873a3b3ab6816b6f31cecc7e74b285625",
+      "target_sha256": "611936da4d4b89caafe570f450d874e873a3b3ab6816b6f31cecc7e74b285625",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/__main__.py",
+      "target_path": "app/library/__main__.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "050545dfcb75b5365198bc54280f86fe8b3428c5",
+      "source_sha256": "aee2420e118a07b6de9de765e391e19ad8a909f0eb3cc21a3aa5e420f0b91586",
+      "target_sha256": "aee2420e118a07b6de9de765e391e19ad8a909f0eb3cc21a3aa5e420f0b91586",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/adapters/__init__.py",
+      "target_path": "app/library/adapters/__init__.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "b458d18f33671729cfc3d0c6eb8141db6c5e0ed1",
+      "source_sha256": "ce360543e31cb92703a09a58e6563b02e53621264075d24f3e58d5a81548b5f5",
+      "target_sha256": "ce360543e31cb92703a09a58e6563b02e53621264075d24f3e58d5a81548b5f5",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/adapters/base.py",
+      "target_path": "app/library/adapters/base.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "a22265e690df0a793bf8dbd424aac7c7a7f4adee",
+      "source_sha256": "d1a5873bb4018b74688f4cf663d66ca91d152012820f562a685df09970caa863",
+      "target_sha256": "d1a5873bb4018b74688f4cf663d66ca91d152012820f562a685df09970caa863",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/adapters/discord.py",
+      "target_path": "app/library/adapters/discord.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "59b8544b8c1be827143d9cc42e607bd5f2d621ee",
+      "source_sha256": "2d3d99e8ef5eb36f6b5adf31f0beab6c30287940781157ba0619c5af1da7d542",
+      "target_sha256": "2d3d99e8ef5eb36f6b5adf31f0beab6c30287940781157ba0619c5af1da7d542",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/adapters/reports.py",
+      "target_path": "app/library/adapters/reports.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "08b5ec8daa91743fd5eba9cb749192b9595c2bd5",
+      "source_sha256": "c9e01431bfbbcb981e2bcdec6c961aa01c76fd87da94f2bedc9a870f4b707ce2",
+      "target_sha256": "c9e01431bfbbcb981e2bcdec6c961aa01c76fd87da94f2bedc9a870f4b707ce2",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/api.py",
+      "target_path": "app/library/api.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "8624a10fab4db9794fc6a8c363bc63f425827d8f",
+      "source_sha256": "5b20b96353d6403b906f74cf219eb77b7317e4331a00a08009a7497e70afbd9f",
+      "target_sha256": "5b20b96353d6403b906f74cf219eb77b7317e4331a00a08009a7497e70afbd9f",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/catalog.py",
+      "target_path": "app/library/catalog.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "a4ca9bbbe4b8fefbc03a8d059ae2f0223be99df6",
+      "source_sha256": "d9559482cdda9aa380e2b3bd73e5b293bc485a34079c2dbe030370bedfa948cd",
+      "target_sha256": "d9559482cdda9aa380e2b3bd73e5b293bc485a34079c2dbe030370bedfa948cd",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/changes.py",
+      "target_path": "app/library/changes.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "cba82f018a99a8168378e44b27b62117a75b9701",
+      "source_sha256": "4593d0b75927b5af834ad33ae62a58d9dd6fb0720ef87c29575bb17da423705f",
+      "target_sha256": "4593d0b75927b5af834ad33ae62a58d9dd6fb0720ef87c29575bb17da423705f",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/collector.py",
+      "target_path": "app/library/collector.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "46e75106eae18b2d2ab04a2f13321c81e2886392",
+      "source_sha256": "32435e989e7153100a4483a0b968e76500d7da248a91d9c4c098cc7523c39ee1",
+      "target_sha256": "32435e989e7153100a4483a0b968e76500d7da248a91d9c4c098cc7523c39ee1",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/config.py",
+      "target_path": "app/library/config.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "48282d8fb641f447951f86c1c896c3e196466ff8",
+      "source_sha256": "eb36d625adcd66263ee13e6357fe5dc999344e8c2f7caa13d2283ac3b753b5ae",
+      "target_sha256": "eb36d625adcd66263ee13e6357fe5dc999344e8c2f7caa13d2283ac3b753b5ae",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/dashboard.py",
+      "target_path": "app/library/dashboard.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "7572712964175f89843aad149eb08d23c49f2462",
+      "source_sha256": "7d9f192cae65b00ccab28b132943a87d965dfab8c18c6b38cf247e21883df854",
+      "target_sha256": "7d9f192cae65b00ccab28b132943a87d965dfab8c18c6b38cf247e21883df854",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/fileserve.py",
+      "target_path": "app/library/fileserve.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "cd8dfa6e6c8575b1c71c147f9d2fa3cf38ee9ece",
+      "source_sha256": "fbfa151c96b23974e5735e35623571baf6f79f26fb2a61e70a23e0e1331d3074",
+      "target_sha256": "fbfa151c96b23974e5735e35623571baf6f79f26fb2a61e70a23e0e1331d3074",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/ingest.py",
+      "target_path": "app/library/ingest.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "0fe2de23dec9125bd95d4a652559102879516a3f",
+      "source_sha256": "fbfcb5a9b6b4b1b316dced98402afefce1c8dc4cd2cb2c0411538f16cde0247a",
+      "target_sha256": "fbfcb5a9b6b4b1b316dced98402afefce1c8dc4cd2cb2c0411538f16cde0247a",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/locking.py",
+      "target_path": "app/library/locking.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "08cf8cb416b1379031f2b7d5810f251b0855edbf",
+      "source_sha256": "56449f3bb6c25a8e3e393a875e7107d85d43118a581cd6f41405497e5f2aab91",
+      "target_sha256": "56449f3bb6c25a8e3e393a875e7107d85d43118a581cd6f41405497e5f2aab91",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/markdown.py",
+      "target_path": "app/library/markdown.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "bccb06ff0605321a5e8a7be6e24e1798492a2a64",
+      "source_sha256": "aaa532924005016b6c95a741e3b91be7ab9f5ffd439d4cf3e5a100720eb54d5f",
+      "target_sha256": "aaa532924005016b6c95a741e3b91be7ab9f5ffd439d4cf3e5a100720eb54d5f",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/models.py",
+      "target_path": "app/library/models.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "6b516539193781babd623ed68976e9ecc71ed0bf",
+      "source_sha256": "d3a5b73c320e19fca0ce36989078c9b15476745c2b5a286f475aa27ff121c86d",
+      "target_sha256": "d3a5b73c320e19fca0ce36989078c9b15476745c2b5a286f475aa27ff121c86d",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/monitor.py",
+      "target_path": "app/library/monitor.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "b3b571747f31442cbfade78bb38da7150a212404",
+      "source_sha256": "cfeaf3586b1b7593c40e310341f39b359e358f66e3f8490d275b22c4d8f9bc72",
+      "target_sha256": "cfeaf3586b1b7593c40e310341f39b359e358f66e3f8490d275b22c4d8f9bc72",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/runtime.py",
+      "target_path": "app/library/runtime.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "e484e6817eb6c961f2b1ee6f64564288767e598b",
+      "source_sha256": "8517fe2a05f7bf9525143c25ea4569f32742972d4f8bdde7b9ef965bc6c1670e",
+      "target_sha256": "8517fe2a05f7bf9525143c25ea4569f32742972d4f8bdde7b9ef965bc6c1670e",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/status.py",
+      "target_path": "app/library/status.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "7c57599983fcd0d9a4171b6193c7197c8e285af3",
+      "source_sha256": "3a1ac95969cd73d639e5b0f96741715a51020065974e5966b2cd6437b56669bb",
+      "target_sha256": "3a1ac95969cd73d639e5b0f96741715a51020065974e5966b2cd6437b56669bb",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/library/textutil.py",
+      "target_path": "app/library/textutil.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "5229362bd8676305469a0402b858671e6b642856",
+      "source_sha256": "1fa0f136fbb7da6756e5a666b5ce72741b1b88cdea93bfae5c3635fa51e8b37e",
+      "target_sha256": "1fa0f136fbb7da6756e5a666b5ce72741b1b88cdea93bfae5c3635fa51e8b37e",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/fixtures.py",
+      "target_path": "app/tests/fixtures.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "ac09f5439684be5977ff57283e9d68a0e9b4a74c",
+      "source_sha256": "48c87391903ca014084af84f32d54b26b8df93a852bfeee61781a6a16df8f1ab",
+      "target_sha256": "48c87391903ca014084af84f32d54b26b8df93a852bfeee61781a6a16df8f1ab",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_adapters.py",
+      "target_path": "app/tests/test_adapters.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "a88e60e6d227703f03edd73a68c636d02eb1ae74",
+      "source_sha256": "5f8ef5ae5c06dcab1717d71a286817a9de6ac854f771eb470a104e2e920b5ece",
+      "target_sha256": "5f8ef5ae5c06dcab1717d71a286817a9de6ac854f771eb470a104e2e920b5ece",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_api.py",
+      "target_path": "app/tests/test_api.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "18cfab047584d82d487ed7f4345ba230aeb72fd4",
+      "source_sha256": "66ec455c8e9e2c72604ef00f00bf911e53b2a42ee339724f6f523a8f4aa37b24",
+      "target_sha256": "66ec455c8e9e2c72604ef00f00bf911e53b2a42ee339724f6f523a8f4aa37b24",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_catalog.py",
+      "target_path": "app/tests/test_catalog.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "05c201609b466b20fd6ae7eb6f36dc343a44357e",
+      "source_sha256": "5eac52dd7434b92b173bfa9ad169b25199fb3b94f32d2b93d7fb47b08b877c40",
+      "target_sha256": "5eac52dd7434b92b173bfa9ad169b25199fb3b94f32d2b93d7fb47b08b877c40",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_changes.py",
+      "target_path": "app/tests/test_changes.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "1755927de9514b17a3c56b9d6f245859967a338b",
+      "source_sha256": "fffe473904d98e7bc1e26e7ecb75b7b3e6f75bfb1d50975eec01d810deab7e6c",
+      "target_sha256": "fffe473904d98e7bc1e26e7ecb75b7b3e6f75bfb1d50975eec01d810deab7e6c",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_dashboard.py",
+      "target_path": "app/tests/test_dashboard.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "c240040a4651345cfa9029aa7e242c958e127340",
+      "source_sha256": "bef1a4f478fef08b0f2893be4260f469fee6ae30d4f205e3fd7cde72ba8c88b3",
+      "target_sha256": "bef1a4f478fef08b0f2893be4260f469fee6ae30d4f205e3fd7cde72ba8c88b3",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_fileserve.py",
+      "target_path": "app/tests/test_fileserve.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "b98588f3eb5092b535ab1ef4b760a84dd9aeae4c",
+      "source_sha256": "3ca04191401b9e5d1cd76c00e2170cf43341a23b198780c7e8aea31ed4371069",
+      "target_sha256": "3ca04191401b9e5d1cd76c00e2170cf43341a23b198780c7e8aea31ed4371069",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_locking.py",
+      "target_path": "app/tests/test_locking.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "6c3d534f2ff8cf223ea02f91f0dbc71785cd95a4",
+      "source_sha256": "afd5c14f57a779a74700ce32784e77404cbca50aac68136eb53ac3bf2160eea4",
+      "target_sha256": "afd5c14f57a779a74700ce32784e77404cbca50aac68136eb53ac3bf2160eea4",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_markdown.py",
+      "target_path": "app/tests/test_markdown.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "67e2ad425f19cefa29c0b8a141d2933732f2fca7",
+      "source_sha256": "480dc73b3d5c97b385d012454dcf03499b9f331a5685f0cadba96ab819458bf7",
+      "target_sha256": "480dc73b3d5c97b385d012454dcf03499b9f331a5685f0cadba96ab819458bf7",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_monitor.py",
+      "target_path": "app/tests/test_monitor.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "1f3555420688b2ef39dff5663bba5c590c2fb13c",
+      "source_sha256": "0ed425d61c8af663cbba8064459db015411055d04a73e7a4a727bdff4c0eb2db",
+      "target_sha256": "0ed425d61c8af663cbba8064459db015411055d04a73e7a4a727bdff4c0eb2db",
+      "adaptations": []
+    },
+    {
+      "source_path": "app/tests/test_status.py",
+      "target_path": "app/tests/test_status.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "e06d68615db5886aca9d3cc5248d7fd57abaac8f",
+      "source_sha256": "42b819a5a77ee9741415c2aa5a3a6602a85d923af03d65e73bbf66b09208e0bd",
+      "target_sha256": "42b819a5a77ee9741415c2aa5a3a6602a85d923af03d65e73bbf66b09208e0bd",
+      "adaptations": []
+    },
+    {
+      "source_path": "config/.env.example",
+      "target_path": "config/.env.example",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "f28f2ccb183fbe2b6df4675264612c4f9f2aeec1",
+      "source_sha256": "26d1675686599da8e3ac12eb3335d741253063610d9aa85e17ff2c3adf35a08e",
+      "target_sha256": "ce582dd8a6ecaa5e780bb965c57b0ae599c7251534282ba7c1caf5f6e83d7148",
+      "adaptations": [
+        "line_endings_normalized_crlf_to_lf"
+      ]
+    },
+    {
+      "source_path": "config/config.example.json",
+      "target_path": "config/config.example.json",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "4c04d8c75e7904af806447acc5a55d2bf1102b76",
+      "source_sha256": "6fbf0c84ab4154c3dee803ee9d1e66c7e35a32f4fc3f28b7ef6a582e2d0e19ea",
+      "target_sha256": "6fbf0c84ab4154c3dee803ee9d1e66c7e35a32f4fc3f28b7ef6a582e2d0e19ea",
+      "adaptations": []
+    },
+    {
+      "source_path": "config/stignore",
+      "target_path": "config/stignore",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "b5b30b9492e52c0a7e6aa00d68eba28d92fafc28",
+      "source_sha256": "e57edac52ed22b6d3a23e51d3fe99c27b430849f1148f7877169996e21b6e5fe",
+      "target_sha256": "0969a1c09b97dfcb9e7a8660f84410284f2fee5abbb1b4c1a1e7df4b1edec5af",
+      "adaptations": [
+        "line_endings_normalized_crlf_to_lf"
+      ]
+    },
+    {
+      "source_path": "docker-compose.yml",
+      "target_path": "docker-compose.yml",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "0a0157786b0d725e78d18010750a3c115985956c",
+      "source_sha256": "fc154f8f8dc4db5538f931de1ea3c67738c555b5dd1d858512ea258b540b1475",
+      "target_sha256": "fc154f8f8dc4db5538f931de1ea3c67738c555b5dd1d858512ea258b540b1475",
+      "adaptations": []
+    },
+    {
+      "source_path": "docs/CHANGELOG.md",
+      "target_path": "docs/legacy/CHANGELOG.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "0752f48d6a064b1c2bd9e38a0fe4219ed3e87997",
+      "source_sha256": "bfc3f4d63dcd8be385a87b68a471c47d6c554258eed78004e0c59fedd6ed49ab",
+      "target_sha256": "62f82fff5c617a5c26d72f70397ab64dbeb39b29daaa15cc3c16ee925234c3f7",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "docs/DESIGN.md",
+      "target_path": "docs/legacy/DESIGN.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "85d788728eaf59793bd365196d186e68b41cb32e",
+      "source_sha256": "e40a742ed04262832421bf0eb806a084c0c79a185c61b3e45cf8b9b587394837",
+      "target_sha256": "5034fd8f74665750ab9c23bdfda3836d82bdf371274a016587f0ed4b382780ba",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "docs/GIT_DELIVERY.md",
+      "target_path": "docs/legacy/GIT_DELIVERY.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "0786b8bd0a4761b83cbf2a4a5b4d7bea20914a57",
+      "source_sha256": "e2f1cabda0c94ebfb6bcb7390d2eb362eb24fa52ab8b06290baf1ddfe439389c",
+      "target_sha256": "9a05e709b79080193fe593b0b1d4a22b2a042b60449f634dd10ea20f7dfbb0d9",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "docs/PUBLIC_RUNBOOK.md",
+      "target_path": "docs/legacy/PUBLIC_RUNBOOK.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "98bd5a1e142610133aeeab565cc1018ed1afa43d",
+      "source_sha256": "27660bfb506f98e171506eef88d27070b4cbdaebe5fbc517276e11e5180e53ed",
+      "target_sha256": "942625f8133fb104a779921bed7f78b9c0e981a569521cb7a23d93d7fcdd77e2",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "docs/REQUIREMENTS.md",
+      "target_path": "docs/legacy/REQUIREMENTS.md",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "8bf912cc2c561c17a51620dd4a01d7cdc8ffd527",
+      "source_sha256": "0b9ca27d002ccc991350af8c1dc4023d4119ad8d60b4428bc302c6d05da3e80b",
+      "target_sha256": "70921a728b0f8f349c22f9dc27e75f72402ab3b2e58ef4024cd78d47e5bea5b0",
+      "adaptations": [
+        "legacy_banner_and_link_fix"
+      ]
+    },
+    {
+      "source_path": "scripts/backup-catalog.sh",
+      "target_path": "scripts/backup-catalog.sh",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "fd6993bd1d3ee3f50d0e8ef004818e1367772135",
+      "source_sha256": "2969ae9c598d8c419cc96864fe53b250b94a63e893f2ae8f8ccb4d2a317868ac",
+      "target_sha256": "2969ae9c598d8c419cc96864fe53b250b94a63e893f2ae8f8ccb4d2a317868ac",
+      "adaptations": []
+    },
+    {
+      "source_path": "scripts/deploy.sh",
+      "target_path": "scripts/deploy.sh",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "4ece673bf9d41c3897423662fbf8e2a0dd49f0f7",
+      "source_sha256": "05e7fc689978c0e59773961f078fa89b718b5110193c12c80aa71d78b6dad44f",
+      "target_sha256": "05e7fc689978c0e59773961f078fa89b718b5110193c12c80aa71d78b6dad44f",
+      "adaptations": []
+    },
+    {
+      "source_path": "scripts/install-windows.ps1",
+      "target_path": "scripts/install-windows.ps1",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "60f8b181c8a89b7fb1defcf2bc3d9c330a30e994",
+      "source_sha256": "343027ce17de248d776c2c1323fe9a52ddd46ccb3425b785000135c6b56759b9",
+      "target_sha256": "e196cf781b139a4e6acd12406a777f554a878e910bcd7e21e4d54c85bb12a037",
+      "adaptations": [
+        "line_endings_normalized_crlf_to_lf"
+      ]
+    },
+    {
+      "source_path": "scripts/syncthing_configure.py",
+      "target_path": "scripts/syncthing_configure.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "b3a8bb8423b08d19a53bb1288ffaf6273c1b17e9",
+      "source_sha256": "46d91c92598707949b55936e370ccfc5fbef541e8c8eb640b7e7f87bb83d1e62",
+      "target_sha256": "46d91c92598707949b55936e370ccfc5fbef541e8c8eb640b7e7f87bb83d1e62",
+      "adaptations": []
+    },
+    {
+      "source_path": "scripts/verify-api.py",
+      "target_path": "scripts/verify-api.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "020e5bc8926d7f9497ab755779d8a88c3c3cec84",
+      "source_sha256": "fe4e751e7cb0f02cf717da16453489b68972083b364f669f436b1699d906ba13",
+      "target_sha256": "fe4e751e7cb0f02cf717da16453489b68972083b364f669f436b1699d906ba13",
+      "adaptations": []
+    },
+    {
+      "source_path": "scripts/verify-versions.py",
+      "target_path": "scripts/verify-versions.py",
+      "source_commit": "5442e397b3b1276af6ae18403bf2e51103ad6249",
+      "source_blob_sha1": "48864d760cfbf1dd4c101d437e8c80287a94fd0b",
+      "source_sha256": "80e9b7fb6a04b05728eb1e44545cc42444d7a4d1bb9fabeed591d6b5c0f1d795",
+      "target_sha256": "80e9b7fb6a04b05728eb1e44545cc42444d7a4d1bb9fabeed591d6b5c0f1d795",
+      "adaptations": []
+    }
+  ],
+  "merged_root_configs": {
+    ".dockerignore": "rules reviewed and merged into main repo root config",
+    ".gitattributes": "rules reviewed and merged into main repo root config",
+    ".gitignore": "rules reviewed and merged into main repo root config"
+  },
+  "excluded_categories": [
+    ".git directory of source repo",
+    "opencode.json (old agent permission config)",
+    "source AGENTS.md (old task constraints, gitignored in source)",
+    ".env and config/config.json (real deployment values)",
+    "untracked private docs: docs/ACCEPTANCE.md, RUNBOOK.md, ENVIRONMENT.md, ISSUES.md, TASKBOOK.md, OPENCODE_TASK.md, REVIEW-*.md, DEPLOYMENT_MANIFEST.json, docs/source-readmes/",
+    "untracked private scripts: scripts/deploy-checks.sh, diag_*.py, scan-publication.py, configure-syncthing-server.sh, syncthing-status-server.sh, lock-demo.sh, verify-server.sh",
+    "runtime state: catalog/, state/, backups/, vault/, tools/, __pycache__"
+  ],
+  "notes": [
+    "app/ code: all 32 python files byte-identical to source blobs (sha256 match, zero adaptations).",
+    "3 files (.env.example, stignore, install-windows.ps1) differ from source blob only by CRLF->LF normalization under .gitattributes * text=auto; verified content-equal ignoring line endings.",
+    "README.md + 5 public docs relocated to docs/legacy/ with provenance banner and link fixes; content otherwise unchanged.",
+    "Root .gitignore merged: source rule ignoring AGENTS.md deliberately NOT carried over (main repo tracks its own AGENTS.md)."
+  ]
+}

@@ -1,26 +1,57 @@
-# Runtime and private material
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+
+# Local deployment configuration / secrets (must not be published)
 .env
 .env.*
 !.env.example
+config/.env
+config/config.json
+opencode.json
+
+# Runtime state / databases / vault / installers
 runtime/
 data/
 artifacts/
 logs/
 backups/
+catalog/
+state/
+vault/
+tools/
 *.db
 *.db-wal
 *.db-shm
 *.sqlite
 *.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.pem
 *.key
+
+# Local evidence for reviews / private environment docs (kept on disk, not published)
+docs/ENVIRONMENT.md
+docs/ACCEPTANCE.md
+docs/ISSUES.md
+docs/RUNBOOK.md
+docs/DEPLOYMENT_MANIFEST.json
+docs/REVIEW-*.md
+docs/source-readmes/
+
+# Private materials (never commit sources or personal notes)
 ResearchVault/
 ResearchTools/
-__pycache__/
-.pytest_cache/
-.venv/
 *.pdf
 *.png
 *.jpg
 *.jpeg
 *.zip
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini
