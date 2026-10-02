@@ -29,8 +29,8 @@ from .quality import (
 
 # Versioned extraction configuration; changes must produce a new digest.
 # v2: optional OCR engine integration (PDF per-page + images).
-EXTRACT_CONFIG = {"normalization": 2, "blocks": "evidence-block-v1",
-                  "ocr": "optional-engine-v1"}
+EXTRACT_CONFIG = {"normalization": 3, "blocks": "evidence-block-v1",
+                  "ocr": "fallback-engine-v1"}
 
 STAGE_EXTRACT = "extract"
 
@@ -461,7 +461,8 @@ def _pdf_content_text(content: bytes) -> Tuple[List[str], bool]:
     return pieces, cid_suspect
 
 
-def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None) -> ExtractionResult:
+def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
+                fallback_ocr=None) -> ExtractionResult:
     issues: List[str] = []
     objects = _parse_objects(raw)
     page_nums: List[int] = []
@@ -507,12 +508,30 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None) -> Extract
                 try:
                     png = render(raw, page_index, dpi=render_dpi)
                     ocr_text, confidence = ocr.run(png)
+                    engine_label = getattr(ocr, "name", "ocr")
+                    threshold = getattr(ocr_config, "fallback_min_confidence", 0.0)
+                    if ((not ocr_text.strip() or confidence < threshold)
+                            and fallback_ocr is not None):
+                        try:
+                            better_text, fb_conf = fallback_ocr.run(png)
+                            if better_text.strip():
+                                issues.append(
+                                    "page_%d_ocr_fallback:%s->%s:conf=%.2f->%.2f"
+                                    % (page_index, engine_label,
+                                       getattr(fallback_ocr, "name", "fallback"),
+                                       confidence, fb_conf))
+                                ocr_text = better_text
+                                confidence = max(confidence, fb_conf)
+                                engine_label = getattr(fallback_ocr, "name",
+                                                       "fallback")
+                        except Exception:  # fallback failure is non-fatal
+                            issues.append("page_%d_ocr_fallback_failed"
+                                          % page_index)
                     if ocr_text.strip():
                         page_text = (page_text + "\n" + ocr_text).strip()
                         ocr_applied += 1
                         issues.append("page_%d_ocr_applied:%s:conf=%.2f"
-                                      % (page_index, getattr(ocr, "name", "ocr"),
-                                         confidence))
+                                      % (page_index, engine_label, confidence))
                 except OcrEngineError as exc:
                     issues.append("page_%d_ocr_failed:%s" % (page_index, exc))
                 except Exception as exc:  # renderer/engine errors never abort

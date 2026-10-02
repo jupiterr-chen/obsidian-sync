@@ -1,0 +1,130 @@
+# FULL-STACK orchestration for obsidian-sync (cutover target, P6).
+
+# Supersedes the first-layer docker-compose.yml at cutover time: library +
+# syncthing + status-collector (unchanged service shapes, new data home) plus
+# the knowledge worker and API. The old research-kb stack keeps running until
+# the user explicitly confirms takedown (see deploy/CUTOVER.md).
+
+# Data home: RESEARCHKB_HOME (default the new project dir on the server).
+# Source archives stay READ-ONLY mounts. Real config/config.json and
+# config/knowledge.json live under ./config (not in git).
+
+name: obsidian-sync
+
+x-library-base: &library-base
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: obsidian-sync-library:0.1.0
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  library:
+    <<: *library-base
+    container_name: obsidian-sync-library
+    environment:
+      RESEARCHKB_CONFIG: /app/config/config.json
+    volumes:
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}:/data
+      - ${RESEARCHKB_REPORTS:?set RESEARCHKB_REPORTS}:/archive:ro
+      - ${RESEARCHKB_DISCORD:?set RESEARCHKB_DISCORD}:/discord:ro
+      - ./config/config.json:/app/config/config.json:ro
+    ports:
+      - "${RESEARCHKB_BIND:-127.0.0.1}:8765:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8765/healthz').read()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  syncthing:
+    image: syncthing/syncthing:latest
+    container_name: obsidian-sync-syncthing
+    restart: unless-stopped
+    network_mode: host
+    user: "0:0"
+    environment:
+      HOME: /var/syncthing
+      STHOMEDIR: /var/syncthing/config
+      STGUIADDRESS: 127.0.0.1:8384
+      PUID: "0"
+      PGID: "0"
+    volumes:
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state/syncthing:/var/syncthing
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/vault:/data
+
+  status-collector:
+    <<: *library-base
+    container_name: obsidian-sync-status-collector
+    network_mode: host
+    command: ["python", "-m", "library.collector"]
+    healthcheck:
+      disable: true
+    environment:
+      RESEARCHKB_SYNCTHING_CONFIG: /syncthing-config/config.xml
+      RESEARCHKB_MONITOR_DIR: /monitor
+      RESEARCHKB_SYNCTHING_GUI: ${RESEARCHKB_SYNCTHING_GUI:-http://127.0.0.1:8384}
+      RESEARCHKB_SYNCTHING_FOLDER: ${RESEARCHKB_SYNCTHING_FOLDER:-}
+      RESEARCHKB_SYNCTHING_PEER_ALIAS: ${RESEARCHKB_SYNCTHING_PEER_ALIAS:-Windows 设备}
+      RESEARCHKB_SYNCTHING_PEER_ID: ${RESEARCHKB_SYNCTHING_PEER_ID:-}
+      RESEARCHKB_MONITOR_INTERVAL: ${RESEARCHKB_MONITOR_INTERVAL:-20}
+    volumes:
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state/syncthing/config:/syncthing-config:ro
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state/monitor:/monitor
+    depends_on:
+      - syncthing
+
+  knowledge-worker:
+    <<: *library-base
+    container_name: obsidian-sync-knowledge-worker
+    command: ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
+    environment:
+      RESEARCHKB_KNOWLEDGE_CONFIG: /app-config/knowledge.json
+    volumes:
+      # first-layer catalog: READ-ONLY for the knowledge layer (ADR0003)
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/catalog:/catalog:ro
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state:/state
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/vault:/vault
+      - ./config:/app-config:ro
+      - ${RESEARCHKB_REPORTS:?set RESEARCHKB_REPORTS}:/archive:ro
+      - ${RESEARCHKB_DISCORD:?set RESEARCHKB_DISCORD}:/discord:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1g
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import sys; sys.path.insert(0, '/app'); "
+             "from knowledge.worker import worker_is_stale; "
+             "sys.exit(0 if worker_is_stale('/state/knowledge-worker.json') is False else 1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  knowledge-api:
+    <<: *library-base
+    container_name: obsidian-sync-knowledge-api
+    command: ["python", "-m", "knowledge", "serve-kb", "--config", "/app-config/knowledge.json"]
+    volumes:
+      - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state:/state
+      - ./config:/app-config:ro
+    ports:
+      - "${RESEARCHKB_KB_BIND:-127.0.0.1}:8766:8766"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/kb/v1/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

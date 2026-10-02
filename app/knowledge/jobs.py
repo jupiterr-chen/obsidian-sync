@@ -183,7 +183,8 @@ class JobRunner:
             raw = handle.read()
         ocr_engine = self.ocr_engine()
         result = extractor(raw, ocr=ocr_engine,
-                           ocr_config=self.config.ocr_config())
+                           ocr_config=self.config.ocr_config(),
+                           fallback_ocr=self.fallback_ocr_engine())
         extraction_id = compute_extraction_id(
             job["source"], job["doc_id"], job["version_id"], snap["sha256"],
             result.parser_id, result.parser_version, self.extract_digest,
@@ -227,6 +228,22 @@ class JobRunner:
             # vision-api selected but unfilled: run without OCR and let the
             # extraction flag needs_ocr honestly instead of failing the job
             return None
+
+    def fallback_ocr_engine(self):
+        from .ocr import build_fallback_engine
+
+        try:
+            return build_fallback_engine(
+                self.config.ocr_config(),
+                providers=self._providers(),
+                provider_specs=(self.config.extra.get("providers") or {}))
+        except Exception:
+            return None
+
+    def _providers(self):
+        from .providers import load_providers
+
+        return load_providers(self.config.extra)
 
     def status(self) -> Dict[str, Any]:
         counts = self.kb.job_counts("snapshot")

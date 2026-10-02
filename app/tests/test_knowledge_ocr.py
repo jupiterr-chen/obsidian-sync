@@ -16,6 +16,7 @@ from knowledge.ocr import (
     LocalRapidOcr,
     OcrConfig,
     OcrEngineError,
+    build_fallback_engine,
     build_ocr_engine,
     render_page_to_png,
 )
@@ -124,3 +125,56 @@ def build_pdf_bytes(content: bytes) -> bytes:
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FallbackRouteTest(unittest.TestCase):
+    def test_low_confidence_page_escalates_to_fallback(self):
+        config = OcrConfig(engine="local", fallback="vision-api",
+                           fallback_min_confidence=0.6)
+        weak = FakeOcr(text="garbled short", confidence=0.3)
+        strong = FakeOcr(text="fallback 引擎识别出的完整正文内容足够长因此通过质量阈值",
+                         confidence=0.95)
+        raw = build_pdf_bytes(b"BT ET")
+        result = extract_pdf(raw, ocr=weak, ocr_config=config,
+                             renderer=lambda r, p, dpi=200: b"PNG",
+                             fallback_ocr=strong)
+        self.assertTrue(any("ocr_fallback:fake-ocr->fake-ocr" in i
+                            for i in result.issues))
+        self.assertIn("fallback 引擎识别出的完整正文", result.blocks[0].text)
+
+    def test_high_confidence_skips_fallback(self):
+        config = OcrConfig(engine="local", fallback="vision-api",
+                           fallback_min_confidence=0.6)
+        good = FakeOcr(text="本地引擎高质量识别的正文内容足够长因此不需要回退处理",
+                       confidence=0.97)
+        unused = FakeOcr(text="should not appear")
+        raw = build_pdf_bytes(b"BT ET")
+        result = extract_pdf(raw, ocr=good, ocr_config=config,
+                             renderer=lambda r, p, dpi=200: b"PNG",
+                             fallback_ocr=unused)
+        self.assertFalse(any("ocr_fallback:" in i for i in result.issues))
+        self.assertNotIn("should not appear", result.blocks[0].text)
+
+    def test_build_fallback_engine_gates(self):
+        from knowledge.ocr import VisionApiOcr
+        from knowledge.providers import OpenAICompatibleVision
+
+        vision = OpenAICompatibleVision("vision_ocr", "GLM-5.3-Flash",
+                                        "https://x.example", "real-key",
+                                        egress_allowed=True)
+        engine = build_fallback_engine(
+            OcrConfig(fallback="vision-api"),
+            providers={"vision_ocr": vision},
+            provider_specs={"vision_ocr": {"api_key": "real-key",
+                                           "egress_allowed": True}})
+        self.assertIsInstance(engine, VisionApiOcr)
+        # egress off -> no fallback
+        self.assertIsNone(build_fallback_engine(
+            OcrConfig(fallback="vision-api"),
+            providers={"vision_ocr": OpenAICompatibleVision(
+                "vision_ocr", "m", "https://x.example", "k",
+                egress_allowed=False)},
+            provider_specs={"vision_ocr": {"api_key": "k",
+                                           "egress_allowed": False}}))
+        # not configured -> none
+        self.assertIsNone(build_fallback_engine(OcrConfig()))

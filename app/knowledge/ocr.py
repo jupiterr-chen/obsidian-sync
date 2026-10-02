@@ -23,6 +23,8 @@ class OcrEngineError(Exception):
 @dataclass
 class OcrConfig:
     engine: str = "local"            # local | vision-api | off
+    fallback: Optional[str] = None   # None | vision-api (low-confidence pages)
+    fallback_min_confidence: float = 0.6
     languages: list = field(default_factory=lambda: ["ch", "en"])
     render_dpi: int = 200
     min_confidence: float = 0.6
@@ -34,6 +36,8 @@ class OcrConfig:
             return cls()
         return cls(
             engine=str(data.get("engine", "local")),
+            fallback=data.get("fallback") or None,
+            fallback_min_confidence=float(data.get("fallback_min_confidence", 0.6)),
             languages=list(data.get("languages", ["ch", "en"])),
             render_dpi=int(data.get("render_dpi", 200)),
             min_confidence=float(data.get("min_confidence", 0.6)),
@@ -158,6 +162,29 @@ def build_ocr_engine(ocr_config: Optional[OcrConfig],
     if not engine.available():
         return None  # honest degradation: extraction flags needs_ocr_engine
     return engine
+
+
+def build_fallback_engine(ocr_config: Optional[OcrConfig],
+                          providers: Optional[Dict[str, Any]] = None,
+                          provider_specs: Optional[Dict[str, Any]] = None
+                          ) -> Optional[OcrEngine]:
+    """Low-confidence page fallback (ocr.fallback). None when not configured.
+
+    vision-api fallback requires a filled providers.vision_ocr with
+    egress_allowed=true; anything missing degrades to no fallback rather
+    than failing the extraction job.
+    """
+    config = ocr_config or OcrConfig()
+    if config.fallback != "vision-api":
+        return None
+    spec = provider_specs.get("vision_ocr") or {}
+    filled = spec and not str(spec.get("api_key", "")).startswith("FILL-ME")
+    if not filled or not spec.get("egress_allowed"):
+        return None
+    provider = providers.get("vision_ocr")
+    if provider is None:
+        return None
+    return VisionApiOcr(chat_provider=provider, provider_spec=spec)
 
 
 def render_page_to_png(raw_pdf: bytes, page_number: int,
