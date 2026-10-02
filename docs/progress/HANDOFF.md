@@ -51,6 +51,11 @@
   - vision（GLM-5.3-Flash，egress 已开）：**确认支持图片输入**。真实扫描页对比：flash 21.4s/页、拼写与空格明显更好（本地 "Commodies/Sel-ff" 类错误），成本约 7.5K tokens/页；本地 RapidOCR 56.4s（同时背负 OCR 回填 CPU 竞争，中文两者相当）。结论：批量走本地，疑难页/图表用 flash 复核仍是合理路线（fallback 混合路由待实现）。
   - embedding（opencode.ai zen + deepseek/deepseek-v4.1-flash）：`/embeddings` 返回 **HTTP 403 error 1010**（网关拒绝该端点/模型不可 embedding）—— 需用户确认网关支持的 embedding 模型名或换回智谱 embedding-3；混合检索继续 keyword 模式（按设计 422）。
   - **分析产物 Vault 写回已打通**（零 Syncthing 配置变更）：`export-analysis` CLI → 服务器 `research-kb/vault/自动研究候选/`（新增生成子区，旧渲染器不碰）→ 现有 Syncthing 文件夹对 → Windows `ResearchVault/自动研究候选/` （实测 30 秒内到达，含引用验证与证据链接）。写回带哈希门禁：人工编辑后不被覆盖。注：文件以只读属性同步，标注请复制或改属性，哈希门禁保护两者。
+- **2026-10-02 深夜：fallback OCR + 全栈编排 + embedding 关闭**：
+  - `ocr.fallback=vision-api` 实现并上线（EXTRACT_CONFIG v3）：本地页置信度 < fallback_min_confidence(0.6) 或空文本时才升级问 flash（每页记录双置信度）；回退失败不伤主流程。后台 v3 全量回填已重启（446 个被取代的 v2 pending 任务已标记 superseded）；至今 fallback 触发 0 次（本地置信度普遍 0.96+）。
+  - embedding egress 已改 false（用户决定后续再开）；chat/vision 不变。
+  - **`deploy/docker-compose.full.yml`：全栈切换目标编排**（library+syncthing+status-collector+knowledge-worker+knowledge-api，容器名 obsidian-sync-*，资源限制+健康检查，catalog 只读挂载）；**`deploy/CUTOVER.md`：切换手册**——回答“为何现在还写旧目录”（旧栈仍在服役，过渡期搭便车）；切换时迁移 Syncthing 设备身份+文件夹 ID → **Windows 端零改动**；回滚=启动旧栈；旧目录清理是另一次单独授权。旧栈下线仍需用户明确确认 + 真实验收完成。
+  - 测试基线 **222 OK**（+3 fallback 路由/门禁）。
 - 修复：CLI rebuild-index 分发 bug（真机首跑发现，已修+回归测试，203 测试 OK，提交 f7f0e45）。
 
 ## 剩余工作 = 外部条件依赖（合并缺项清单）
