@@ -1,0 +1,38 @@
+{
+  "_comment": [
+    "模型供应商配置模板：复制本片段到服务器上的 knowledge 配置（或单独文件由部署脚本合并）。",
+    "填写规则：api_key 只填在服务器/本地的实际配置里，绝不提交 Git。",
+    "egress_allowed=false 时，任何真实调用都会被拒绝——只有你明确允许资料外发后才改为 true。",
+    "kind 目前为预留占位：openai-compatible（对话/embedding）与 openai-compatible-vision（页面图片 OCR/图表理解）。",
+    "适配器在 providers.py 中按这些字段实现后即生效（未实现的 kind 会明确报 ProviderNotConfigured，不会静默降级）。"
+  ],
+  "providers": {
+    "chat": {
+      "kind": "openai-compatible",
+      "base_url": "https://FILL-ME.example/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "egress_allowed": false
+    },
+    "embedding": {
+      "kind": "openai-compatible",
+      "base_url": "https://FILL-ME.example/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "dimensions": 0,
+      "egress_allowed": false
+    },
+    "vision_ocr": {
+      "kind": "openai-compatible-vision",
+      "base_url": "https://FILL-ME.example/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "egress_allowed": false,
+      "_note": "可选：按页图片 OCR/疑难页复核。批量 OCR 建议仍走本地引擎，此通道用于小规模复核与图表数值。"
+    }
+  },
+  "budget": {
+    "max_input_tokens_per_run": 200000,
+    "max_total_input_tokens": null
+  }
+}

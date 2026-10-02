@@ -366,6 +366,45 @@ class KnowledgeLayerTest(unittest.TestCase):
         self.assertEqual(counts["snapshots"], counts["versions"])
         self.assertEqual(self.kb.job_counts("snapshot")[JOB_DONE], counts["versions"])
 
+    def test_cli_rebuild_index_and_evidence_links(self):
+        """Regression: special subcommands must dispatch before the generic
+        fallback (rebuild-index used to raise 'unknown command')."""
+        from knowledge.__main__ import main
+
+        self.sync.run()
+        self._runner().run_snapshot_jobs()
+        self.kb_config.register_stages = ("snapshot", "extract")
+        extract_result = self._runner().run_extract_jobs()
+        self.assertTrue(extract_result["ok"], extract_result.get("errors"))
+        config_path = os.path.join(self.tmp, "knowledge-cli.json")
+        with open(config_path, "w", encoding="utf-8") as handle:
+            json.dump({
+                "catalog_db": self.kb_config.catalog_db,
+                "knowledge_db": self.kb_config.knowledge_db,
+                "snapshot_root": self.kb_config.snapshot_root,
+                "library_config": os.path.join(self.tmp, "unused.json"),
+            }, handle)
+        self.assertEqual(main(["rebuild-index", "--config", config_path]), 0)
+        self.assertIsNotNone(self.kb.active_generation())
+        # rebuild again: unchanged manifest is a no-op but still exit 0
+        self.assertEqual(main(["rebuild-index", "--config", config_path]), 0)
+        # evidence-links over a real snapshot version
+        with self.kb._lock:
+            row = self.kb._conn.execute(
+                "SELECT s.source, s.doc_id FROM snapshots s JOIN extractions e"
+                " ON e.source = s.source AND e.doc_id = s.doc_id"
+                " JOIN blocks b ON b.extraction_id = e.extraction_id"
+                " LIMIT 1").fetchone()
+        out_path = os.path.join(self.tmp, "links.md")
+        self.assertEqual(main(["evidence-links", "--config", config_path,
+                               "--source", row["source"],
+                               "--doc-id", row["doc_id"], "--out", out_path]), 0)
+        self.assertTrue(os.path.isfile(out_path))
+        with open(out_path, "r", encoding="utf-8") as handle:
+            markdown = handle.read()
+        self.assertIn("证据索引", markdown)
+        self.assertIn("/api/kb/v1/evidence/", markdown)
+
 
 if __name__ == "__main__":
     unittest.main()

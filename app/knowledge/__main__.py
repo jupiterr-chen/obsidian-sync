@@ -115,7 +115,6 @@ def main(argv=None) -> int:
             worker.stop()
         return 0
 
-    result = run_knowledge_command(config, args.command, limit=getattr(args, "limit", None))
     if args.command == "rebuild-index":
         from .indexing import build_generation
         from .store import KnowledgeStore
@@ -169,6 +168,8 @@ def main(argv=None) -> int:
             server.server_close()
             kb.close()
         return 0
+
+    result = run_knowledge_command(config, args.command, limit=getattr(args, "limit", None))
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get("ok", True) else 1
 
