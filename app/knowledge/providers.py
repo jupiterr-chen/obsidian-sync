@@ -65,6 +65,152 @@ class ChatProvider:
         raise ProviderNotConfigured("chat provider %r not configured" % self.name)
 
 
+class EgressNotAllowed(Exception):
+    """Real provider call attempted while egress_allowed is false."""
+
+
+class _HttpProvider:
+    """Shared OpenAI-compatible HTTP plumbing (stdlib urllib only)."""
+
+    kind = "openai-compatible"
+
+    def __init__(self, name: str, model: str, base_url: str, api_key: str,
+                 egress_allowed: bool = False, timeout: int = 60,
+                 max_retries: int = 1):
+        self.name = name
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+        self.api_key = api_key
+        self.egress_allowed = bool(egress_allowed)
+        self.timeout = timeout
+        self.max_retries = max_retries
+
+    # ---------------------------------------------------------------- http
+    def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import json as json_mod
+        import urllib.error
+        import urllib.request
+
+        self._require_egress()
+        url = "%s%s" % (self.base_url, path)
+        body = json_mod.dumps(payload, ensure_ascii=False).encode("utf-8")
+        last_error: Optional[Exception] = None
+        for attempt in range(self.max_retries + 1):
+            request = urllib.request.Request(url, data=body, method="POST")
+            request.add_header("Authorization", "Bearer %s" % self.api_key)
+            request.add_header("Content-Type", "application/json")
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                    return json_mod.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = ""
+                try:
+                    detail = exc.read().decode("utf-8", errors="replace")[:300]
+                except Exception:
+                    pass
+                retryable = exc.code in (429, 500, 502, 503, 504)
+                last_error = ProviderCallError(
+                    "HTTP %d from %s: %s" % (exc.code, path, detail),
+                    retryable=retryable)
+                if not retryable or attempt >= self.max_retries:
+                    raise last_error
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = ProviderCallError(
+                    "transport error on %s: %s" % (path, exc), retryable=True)
+                if attempt >= self.max_retries:
+                    raise last_error
+        raise last_error or ProviderCallError("unreachable", retryable=True)
+
+    def _require_egress(self) -> None:
+        if not self.egress_allowed:
+            raise EgressNotAllowed(
+                "provider %r has egress_allowed=false; refusing to send "
+                "anything to %s" % (self.name, self.base_url))
+
+
+class OpenAICompatibleChat(_HttpProvider, ChatProvider):
+    def __init__(self, name: str, model: str, base_url: str, api_key: str,
+                 egress_allowed: bool = False, timeout: int = 60,
+                 max_retries: int = 1, **_extra):
+        super().__init__(name, model, base_url, api_key,
+                         egress_allowed=egress_allowed, timeout=timeout,
+                         max_retries=max_retries)
+
+    def complete(self, prompt: str, max_output_tokens: int = 2000
+                 ) -> Tuple[str, Usage]:
+        return self.complete_messages(
+            [{"role": "user", "content": prompt}], max_output_tokens)
+
+    def complete_messages(self, messages: List[Dict[str, Any]],
+                          max_output_tokens: int = 2000) -> Tuple[str, Usage]:
+        response = self._post("/chat/completions", {
+            "model": self.model, "messages": messages,
+            "max_tokens": max_output_tokens,
+        })
+        choice = (response.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        text = message.get("content") or ""
+        usage_raw = response.get("usage") or {}
+        usage = Usage(
+            self.name, self.model,
+            input_tokens=int(usage_raw.get("prompt_tokens") or 0),
+            output_tokens=int(usage_raw.get("completion_tokens") or 0),
+            cost_basis="openai-compatible:chat:%s" % self.model,
+            extra={k: v for k, v in usage_raw.items()
+                   if k not in ("prompt_tokens", "completion_tokens")},
+        )
+        return text, usage
+
+    def complete_with_image(self, prompt: str, image_bytes: bytes,
+                            mime: str = "image/png",
+                            max_output_tokens: int = 2000) -> Tuple[str, Usage]:
+        import base64
+
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        messages = [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {
+                    "url": "data:%s;base64,%s" % (mime, encoded)}},
+            ],
+        }]
+        return self.complete_messages(messages, max_output_tokens)
+
+
+class OpenAICompatibleVision(OpenAICompatibleChat):
+    kind = "openai-compatible-vision"
+
+
+class OpenAICompatibleEmbedding(_HttpProvider, EmbeddingProvider):
+    def __init__(self, name: str, model: str, base_url: str, api_key: str,
+                 dimensions: int = 0, egress_allowed: bool = False,
+                 timeout: int = 60, max_retries: int = 1, **_extra):
+        super().__init__(name, model, base_url, api_key,
+                         egress_allowed=egress_allowed, timeout=timeout,
+                         max_retries=max_retries)
+        self.dimensions = int(dimensions or 0)
+
+    def embed(self, texts: Sequence[str]) -> Tuple[List[List[float]], Usage]:
+        payload: Dict[str, Any] = {"model": self.model,
+                                   "input": list(texts)}
+        if self.dimensions:
+            payload["dimensions"] = self.dimensions
+        response = self._post("/embeddings", payload)
+        data = sorted(response.get("data") or [], key=lambda d: d.get("index", 0))
+        vectors = [[float(v) for v in item.get("embedding") or []]
+                   for item in data]
+        usage_raw = response.get("usage") or {}
+        usage = Usage(
+            self.name, self.model,
+            input_tokens=int(usage_raw.get("prompt_tokens")
+                             or usage_raw.get("total_tokens") or 0),
+            output_tokens=0,
+            cost_basis="openai-compatible:embedding:%s" % self.model,
+        )
+        return vectors, usage
+
+
 # ------------------------------------------------------------------- mocks
 class MockEmbedder(EmbeddingProvider):
     """Deterministic bag-of-hashed-terms vector. PROTOCOL TESTING ONLY."""
@@ -145,7 +291,7 @@ def load_providers(config_dict: Dict[str, Any]) -> Dict[str, Any]:
 
     Segments still holding FILL-ME placeholders are skipped silently (the
     user has not filled them server-side yet); real-looking values for an
-    unimplemented kind raise instead of degrading.
+    unknown kind raise instead of degrading.
     """
     specs = config_dict.get("providers") or {}
     providers: Dict[str, Any] = {}
@@ -158,8 +304,19 @@ def load_providers(config_dict: Dict[str, Any]) -> Dict[str, Any]:
             continue
         if _is_unfilled(spec):
             continue
-        if kind:
+        common = dict(name=name, model=str(spec.get("model", "")),
+                      base_url=str(spec.get("base_url", "")),
+                      api_key=str(spec.get("api_key", "")),
+                      egress_allowed=bool(spec.get("egress_allowed", False)))
+        if kind == "openai-compatible" and name == "chat":
+            providers[name] = OpenAICompatibleChat(**common)
+        elif kind == "openai-compatible-vision" or (
+                kind == "openai-compatible" and name == "vision_ocr"):
+            providers[name] = OpenAICompatibleVision(**common)
+        elif kind == "openai-compatible" and name == "embedding":
+            providers[name] = OpenAICompatibleEmbedding(
+                dimensions=int(spec.get("dimensions", 0) or 0), **common)
+        elif kind:
             raise ProviderNotConfigured(
-                "provider %r of kind %r has no implementation; real providers "
-                "require user-supplied credentials and budget" % (name, kind))
+                "provider %r of kind %r has no implementation" % (name, kind))
     return providers

@@ -124,9 +124,14 @@ class VisionApiOcr(OcrEngine):
                 "vision OCR requested but no multimodal provider is "
                 "configured (fill providers.vision_ocr and set "
                 "egress_allowed=true)")
-        raise OcrEngineError(
-            "vision provider adapter lands with the real provider work "
-            "(needs the user-supplied API config first)")
+        prompt = ("Transcribe ALL text in this document page image. Keep the "
+                  "original language (Chinese/English mixed as-is). Output "
+                  "plain text only, no commentary.")
+        text, usage = self.chat_provider.complete_with_image(
+            prompt, image_bytes, mime="image/png", max_output_tokens=4000)
+        # vision confidence is unknown -> conservative 0.5 so low-confidence
+        # flagging stays honest (output tokens reveal cost in the ledger)
+        return text, 0.5
 
 
 def build_ocr_engine(ocr_config: Optional[OcrConfig],
