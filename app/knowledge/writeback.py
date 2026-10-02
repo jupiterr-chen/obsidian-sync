@@ -148,3 +148,70 @@ def export_claim_candidates(kb: KnowledgeStore, directory: str,
             owner=owner))
     outcomes = {r["outcome"] for r in results}
     return {"count": len(results), "outcomes": sorted(outcomes), "results": results}
+
+
+def render_analysis_candidate(run: Dict[str, Any]) -> str:
+    """Markdown export of one analysis run (pending-review marked)."""
+    lines = [
+        "# 分析草稿：%s" % (run.get("query") or "")[:60],
+        "",
+        "- **run_id**：`%s`" % run.get("run_id"),
+        "- **状态**：%s（模型草稿，待人工审核）" % run.get("status"),
+        "- **模式**：%s | **提示词版本**：%s" % (run.get("mode"),
+                                                  run.get("prompt_version")),
+        "- **生成时间**：%s" % run.get("created_at"),
+        "",
+        "## 草稿",
+        "",
+        run.get("draft") or "（无草稿：%s）" % (run.get("error") or "unknown"),
+        "",
+        "## 引用证据",
+        "",
+    ]
+    citations = run.get("citations") or []
+    if not citations:
+        lines.append("-（无引用）")
+    for citation in citations:
+        lines.append("- `%s`（%s/%s@%s）→ %s" % (
+            citation.get("block_id", "?"), citation.get("source"),
+            citation.get("doc_id"), citation.get("source_version", ""),
+            citation.get("evidence_url")))
+    verification = run.get("verification") or {}
+    lines += [
+        "",
+        "## 引用验证",
+        "",
+        "- 全部有效：%s" % verification.get("all_valid"),
+        "- 无效引用：%s" % (verification.get("invalid") or "无"),
+        "",
+        "> 本文件由知识服务生成；人工编辑后不会被覆盖（下次导出另存候选）。",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def export_analysis_runs(kb: KnowledgeStore, directory: str,
+                         run_id: Optional[str] = None, limit: int = 10,
+                         owner: str = "knowledge") -> Dict[str, Any]:
+    """Export analysis runs as markdown candidates into a generated area."""
+    if run_id:
+        runs = [kb.get_analysis_run(run_id)]
+        runs = [r for r in runs if r]
+        if not runs:
+            return {"count": 0, "outcomes": [], "results": [],
+                    "error": "run not found"}
+    else:
+        with kb._lock:
+            rows = kb._conn.execute(
+                "SELECT run_id FROM analysis_runs ORDER BY created_at DESC"
+                " LIMIT ?", (max(1, min(int(limit), 100)),)).fetchall()
+        runs = [kb.get_analysis_run(r["run_id"]) for r in rows]
+        runs = [r for r in runs if r]
+    results = []
+    for run in runs:
+        name = "%s.md" % run["run_id"]
+        results.append(write_candidate(
+            directory, name, render_analysis_candidate(run), owner=owner))
+    outcomes = {r["outcome"] for r in results}
+    return {"count": len(results), "outcomes": sorted(outcomes),
+            "results": results}

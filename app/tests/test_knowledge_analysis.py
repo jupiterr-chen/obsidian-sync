@@ -294,3 +294,44 @@ class AnalysisApiTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnalysisExportTest(unittest.TestCase):
+    def test_export_analysis_runs_markdown(self):
+        import os
+
+        from knowledge.writeback import export_analysis_runs, render_analysis_candidate
+
+        kb = KnowledgeStore(os.path.join(temp_dir(), "knowledge.sqlite3"))
+        try:
+            stamp = "2026-10-01T00:00:00Z"
+            kb.upsert_documents([_doc("reports", "R1")], stamp)
+            kb.upsert_versions([_version("reports", "R1", "v1", "a" * 64)], stamp)
+            kb.record_extraction({
+                "extraction_id": "extr-r1", "source": "reports", "doc_id": "R1",
+                "version_id": "v1", "snapshot_sha256": "a" * 64,
+                "parser_id": "t", "parser_version": "1", "config_digest": "c",
+                "status": "ready", "issues": [], "stats": {},
+            }, [_block("paragraph", "毛利率 30%", {"kind": "pdf", "page": 1})])
+            build_generation(kb)
+            chat = ScriptedChat(replies=["毛利率结论。依据 [1]。"])
+            created = kb.create_analysis_run("毛利率如何？")
+            execute_analysis_run(kb, created["run_id"], "毛利率如何？", chat,
+                                 retriever=lambda q, k: search(kb, q, None, limit=k).get("hits", []))
+            out_dir = os.path.join(temp_dir(), "vault-gen")
+            result = export_analysis_runs(kb, out_dir)
+            self.assertEqual(result["count"], 1)
+            path = os.path.join(out_dir, "%s.md" % created["run_id"])
+            with open(path, "r", encoding="utf-8") as handle:
+                markdown = handle.read()
+            self.assertIn("待人工审核", markdown)
+            self.assertIn("毛利率", markdown)
+            self.assertIn("/api/kb/v1/evidence/", markdown)
+            self.assertIn("全部有效：True", markdown)
+            # re-export is a no-op (unchanged); missing run errors cleanly
+            second = export_analysis_runs(kb, out_dir)
+            self.assertEqual(second["outcomes"], ["unchanged"])
+            missing = export_analysis_runs(kb, out_dir, run_id="run-none")
+            self.assertEqual(missing.get("error"), "run not found")
+        finally:
+            kb.close()

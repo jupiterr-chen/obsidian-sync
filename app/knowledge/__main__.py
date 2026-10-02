@@ -20,7 +20,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("sync", "run-snapshots", "run-extracts", "rebuild-index",
                  "serve-kb", "worker", "status", "sample", "measure",
-                 "evidence-links"):
+                 "evidence-links", "export-analysis"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
         if name in ("run-snapshots", "run-extracts"):
@@ -38,6 +38,11 @@ def main(argv=None) -> int:
             child.add_argument("--doc-id", required=True)
             child.add_argument("--out", default=None,
                                help="write markdown fragment to this path")
+        if name == "export-analysis":
+            child.add_argument("--run-id", default=None)
+            child.add_argument("--limit", type=int, default=10)
+            child.add_argument("--out", default=None,
+                               help="override the configured writeback dir")
         if name in ("sample", "measure"):
             child.add_argument("--out", required=True,
                                help="write the JSON result to this path")
@@ -126,6 +131,26 @@ def main(argv=None) -> int:
             kb.close()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("ok") else 1
+    if args.command == "export-analysis":
+        from .store import KnowledgeStore
+        from .writeback import export_analysis_runs
+
+        directory = args.out or ((config.extra.get("writeback") or {}).get(
+            "analysis_dir"))
+        if not directory:
+            print(json.dumps({"ok": False,
+                              "error": "no writeback.analysis_dir configured "
+                                       "and no --out given"}))
+            return 1
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            result = export_analysis_runs(kb, directory,
+                                          run_id=args.run_id,
+                                          limit=args.limit)
+        finally:
+            kb.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("count", 0) else 1
     if args.command == "evidence-links":
         from .cards import evidence_links_for_document, render_evidence_index_markdown
         from .store import KnowledgeStore
