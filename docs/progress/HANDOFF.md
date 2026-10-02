@@ -26,13 +26,26 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-02 真实数据阶段开启（用户已授权）
+
+- **SSH 授权**：`chen@192.168.1.150`（密钥认证可用）；新工程目录 `/vol2/1000/10.Develop/obsidian-sync/`（与 research-kb 同级）已建立：`repo/`（代码，git archive 上传）、`config-knowledge.json`/`config-library.json`（主机路径版）、`state/`（2.2G）。
+- **真实源路径**（来自旧工程 RUNBOOK）：reports `/vol2/1000/10.Develop/reports-fetcher/reports`；discord `/vol2/1000/10.Develop/discord_export`；现网 catalog 只读消费。
+- **已执行（写入仅限新目录，未触碰任何现有容器/数据）**：
+  1. 首次真实 sync：538 文档/528 版本镜像，524 快照任务（4 非 ready 如实跳过）——与旧工程验收记录一致（A01 对账通过）。
+  2. 代表性样本 30 份全通过 → 影子全量回填：524/524 快照（18.5s）、提取（97s）、索引 104,723 块/140 万词项/14.3M 字符。
+  3. 真实检索验证：两字中文词、英文、代码均可检索。
+  4. **真实质量基线**：discord ready 1/review 315/failed 122；reports ready 32/review 43/failed 11；122 份纯扫描件（23%）、19% 页面需 OCR（2792/14751）、220 份 CID 字体（标准库解析器不支持，待 PyMuPDF 级解析器）、343 份 control_characters 标记。
+  5. 分层 30 样本测量：23 份测得正文（启发式约 48.3 万 token，全库外推约 8.4M，仅数量级参考），7 份待 OCR。
+- **待用户决定/授权**：① 模型配置填写（模板 `config/providers.example.json`，填到服务器配置，含 egress_allowed 开关）；② OCR 路线（本地引擎 vs 多模态 LLM）；③ **research-kb 旧容器编排下线需用户明确确认**（已记录为待确认事项，本工程完成全部验收前不动）；④ Vault 写回已授权（待登记生成目录后启用）。
+- 修复：CLI rebuild-index 分发 bug（真机首跑发现，已修+回归测试，203 测试 OK，提交 f7f0e45）。
+
 ## 剩余工作 = 外部条件依赖（合并缺项清单）
 
-1. **真实源访问**（服务器只读路径或本地挂载）：A01 清单对账、A04 真实 30 样本、A05 真实 token 测量、A10 真实检索基准、A14 全量影子回填（523 基线）。具备后执行：`python -m knowledge sync → run-snapshots → run-extracts → rebuild-index`，再 `sample/measure`（接真实 tokenizer counter）。
-2. **生产主机与部署授权**（主机、目录、运行用户、回滚）：compose 已备（deploy/docker-compose.knowledge.yml）；A21 性能与 7 天记录、A22 真实恢复演练、P6 全部生产门禁。
-3. **模型供应商+凭据方式+外发范围+预算**：P4 真实适配器（providers.py 预留）、A16 成本、A17 分析评测、真实 tokenizer。
-4. **OCR 引擎选型**（本地、离线、许可）：P2 真实 OCR 质量门禁（A08 真实部分）。
-5. **真实 Vault 写回授权**（登记 `自动研究候选/` 等生成目录）：P5-03 生产启用。
+1. ~~真实源访问~~ 已解决（2026-10-02）；后续：真实 tokenizer 接入（A05 精确计数）、A10 真实 50 查询基准、A04 人工标注。
+2. **生产部署**（compose 已备 `deploy/docker-compose.knowledge.yml`）：A21 性能与 7 天记录、A22 真实恢复演练；旧 research-kb 容器下线待明确确认。
+3. **模型供应商+凭据方式+外发范围+预算**：P4 真实适配器（providers.py 预留 + providers.example.json 模板）、A16 成本、A17 分析评测、真实 tokenizer。
+4. **OCR 引擎选型**：真实需求数据已测得（122 全扫描件/19% 页面）；本地引擎 vs 多模态 LLM 待用户定。
+5. **真实 Vault 写回**：已授权；待在 ResearchVault 登记 `自动研究候选/` 等生成目录后启用（P5-03）。
 
 ## 准确续跑起点
 
