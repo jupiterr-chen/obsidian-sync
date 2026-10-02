@@ -39,3 +39,7 @@
 - 2026-10-01：P4 完成（离线）。ADR0006 + providers/analysis；RRF 混合召回、引用验证、usage_events 账本、预算门禁；185 测试全过。真实 provider/质量/成本 BLOCKED（供应商、凭据、预算未定）。
 - 2026-10-01：P5 完成（离线）。memory/writeback：追加式 claim 历史、决策冻结、影响分析 proposal（不自动覆盖）、哈希门禁写回；196 测试全过。真实 Vault 写回与 A20 真实评测 BLOCKED。
 - 2026-10-01：P6 离线部分完成。worker（sync→快照→提取→索引→影响分析闭环+心跳）、在线备份/独立目录恢复演练、compose 准备、接入示例；202 测试全过。生产部署/A21/A22 BLOCKED。至此 M0+P1-P6 离线可完成部分全部完成；剩余工作均依赖外部条件（源访问/服务器/模型供应商/写回授权），见 HANDOFF。
+
+## 独立复核追加（2026-10-02，基线534014a）
+
+当前总体NEEDS_CHANGES。M0保真基本通过，222回归OK/2skip；R01-R15重新打开受影响的P1-P6源码验收，原accepted为历史self-review记录，不是独立验收结论。已明确的真实NOT_RUN/BLOCKED仍保留。修复入口为[RF任务书](../15-review-remediation-taskbook.md)，修复任务RF0-RF7当前均todo。

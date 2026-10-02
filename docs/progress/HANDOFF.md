@@ -75,3 +75,7 @@
 ## 会话执行说明
 
 本会话为普通交互会话，无自动唤醒能力：会话结束后不会后台继续。所有已声明完成的工作均已在本会话内执行、测试并推送；未执行事项均如实标注 NOT_RUN/BLOCKED，无虚构。
+
+## 独立评审接续（2026-10-02）
+
+基线534014a已复核：整体NEEDS_CHANGES。未改业务代码或生产服务；下一执行从docs/15-review-remediation-taskbook.md的RF0开始，提示词在docs/16-review-fix-prompt.md。15组问题及合成证据见INDEPENDENT-REVIEW-20261002.md/review-evidence.json。当前不应执行CUTOVER；源迁移无需重做。原真实验收缺项继续保留，源码修复有独立可执行任务。

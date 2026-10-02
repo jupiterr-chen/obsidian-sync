@@ -1,0 +1,121 @@
+{
+  "baseline": "534014a",
+  "date": "2026-10-02",
+  "scope": "synthetic local review; no production or paid provider calls",
+  "suite": {
+    "tests": 222,
+    "skipped": 2,
+    "result": "OK",
+    "seconds": 39.023
+  },
+  "migration": {
+    "mapped_files": 49,
+    "source_hash_mismatches": 0,
+    "target_hash_equal": 46,
+    "documented_crlf_normalizations": 3,
+    "normalized_mismatches": 0
+  },
+  "R01": {
+    "configured_top_level_limit": 1,
+    "loaded_limit": null,
+    "direct_budget_limit": 10,
+    "before": 9,
+    "after": 72,
+    "mock_calls": 1,
+    "vision_usage_persisted": false
+  },
+  "R02": {
+    "off_and_local_dpi300_digest_equal": true
+  },
+  "R03": {
+    "primary_ocr_builder_receives_providers": false
+  },
+  "R04": {
+    "corrupted_blob_extraction_succeeded": true,
+    "recorded_and_actual_sha_equal": false
+  },
+  "R05": {
+    "kids_order": [
+      9,
+      3
+    ],
+    "extracted_page1": "SECOND",
+    "extracted_page2": "FIRST",
+    "sparse_document_status": "ready",
+    "missing_page_issue_present": true,
+    "chars_per_page": []
+  },
+  "R06": {
+    "identical_paragraph_locators": [
+      [
+        0,
+        23
+      ],
+      [
+        0,
+        23
+      ]
+    ],
+    "expected_second": [
+      23,
+      46
+    ]
+  },
+  "R07": {
+    "injected_crash": "after create_generation before write_postings",
+    "retry_ok": true,
+    "active_blocks": 0,
+    "available_source_blocks": 1,
+    "hits": 0
+  },
+  "R08": {
+    "system_as_of": "2026-02-01T00:00:00Z",
+    "v2_mirrored_at": "2026-10-02T00:00:00Z",
+    "returned_versions": [
+      "v1",
+      "v2"
+    ],
+    "default_versions": [
+      "v1",
+      "v2"
+    ],
+    "hits_after_available_false": 2
+  },
+  "R09": {
+    "filter_symbol": "NO_SUCH_SYMBOL",
+    "returned_blocks": 6,
+    "mode": "mock hybrid fallback"
+  },
+  "R10": {
+    "same_second_candidate_path_collision": true,
+    "human_candidate_overwritten": true
+  },
+  "R11": {
+    "generated_version_url_http_status": 404
+  },
+  "R12": {
+    "matches": 6,
+    "limit": 2,
+    "page1": 2,
+    "page2": 1,
+    "next_cursor": null
+  },
+  "R13": {
+    "full_yaml_error_line": 105,
+    "knowledge_yaml_error_line": 39,
+    "parser": "PyYAML",
+    "error": "expected ',' or ']', but got '<scalar>'",
+    "docker_image_executed": false
+  },
+  "R14": {
+    "snapshot_rows": 1,
+    "provided_blob_root": null,
+    "verified_blobs": 0,
+    "drill_ok": true,
+    "exit_code": 0
+  },
+  "R15": {
+    "evidence": "static control flow: synced_at=max + LIMIT25 + new_versions guard",
+    "dynamic_counterexample": "to add as RF5-02 RED test"
+  }
+}

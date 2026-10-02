@@ -45,3 +45,11 @@ M0 与 P1-P6 离线部分已完成并验收（各阶段报告在 docs/progress/�
 - [最新架构决定](docs/adr/0002-consolidate-main-repository.md)
 
 11-14与ADR0002覆盖早期独立仓库假设，任务书不代表实现已完成。
+
+## 最新独立评审（2026-10-02）
+
+基线534014a：222测试通过（2跳过），迁移保真基本通过；知识层整体NEEDS_CHANGES，15组修复问题，尚不满足生产切换条件。
+
+- [评审结果与问题](docs/progress/INDEPENDENT-REVIEW-20261002.md)
+- [RF0-RF7修复任务书](docs/15-review-remediation-taskbook.md)
+- [直接交给agent的修复提示词](docs/16-review-fix-prompt.md)
