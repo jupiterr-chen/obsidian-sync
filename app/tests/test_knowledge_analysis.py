@@ -231,7 +231,13 @@ class ProviderRegistryTest(unittest.TestCase):
         with self.assertRaises(ProviderNotConfigured):
             load_providers({
                 "providers": {"real": {"kind": "openai",
-                                       "api_key": "should-not-exist"}}})
+                                       "base_url": "https://real.example/v4",
+                                       "api_key": "a-real-looking-key",
+                                       "model": "some-model"}}})
+        # FILL-ME placeholders are treated as absent (no raise)
+        self.assertEqual(load_providers({
+            "providers": {"chat": {"kind": "openai", "base_url": "https://FILL-ME",
+                                   "api_key": "FILL-ME", "model": "FILL-ME"}}}), {})
 
 
 class AnalysisApiTest(unittest.TestCase):

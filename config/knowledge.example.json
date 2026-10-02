@@ -1,21 +1,57 @@
 {
+  "_comment": "完整知识层配置模板：除 FILL-ME 项外均已填好默认值。部署时改路径；providers 三段按需填写（不填=该能力关闭，不会报错）；api_key 只存在于服务器实际配置，绝不提交 Git。egress_allowed=false 时任何真实外发调用都会被拒绝。",
+
   "catalog_db": "catalog/catalog.sqlite3",
   "knowledge_db": "state/knowledge.sqlite3",
   "snapshot_root": "state/snapshots",
   "library_config": "config/config.json",
+
   "register_stages": ["snapshot", "extract"],
-  "sync": {
-    "batch_size": 500
-  },
-  "jobs": {
-    "lease_seconds": 900,
-    "max_attempts": 5
-  },
-  "api": {
-    "bind_host": "127.0.0.1",
-    "bind_port": 8766
-  },
+  "sync": {"batch_size": 500},
+  "jobs": {"lease_seconds": 900, "max_attempts": 5},
+
+  "api": {"bind_host": "127.0.0.1", "bind_port": 8766},
   "api_tokens": {
     "REPLACE_WITH_GENERATED_TOKEN": ["research.read"]
+  },
+
+  "ocr": {
+    "engine": "local",
+    "_engine_options": "local = RapidOCR/PP-OCR（默认，离线）；vision-api = 多模态 LLM（需先填 providers.vision_ocr 且 egress_allowed=true）；off = 关闭 OCR",
+    "languages": ["ch", "en"],
+    "render_dpi": 200,
+    "min_confidence": 0.6,
+    "max_pages_per_doc": 200
+  },
+
+  "providers": {
+    "chat": {
+      "kind": "openai-compatible",
+      "base_url": "https://FILL-ME/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "egress_allowed": false
+    },
+    "embedding": {
+      "kind": "openai-compatible",
+      "base_url": "https://FILL-ME/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "dimensions": 0,
+      "egress_allowed": false
+    },
+    "vision_ocr": {
+      "kind": "openai-compatible-vision",
+      "base_url": "https://FILL-ME/api/paas/v4",
+      "api_key": "FILL-ME",
+      "model": "FILL-ME",
+      "egress_allowed": false,
+      "_note": "可选：多模态页图 OCR/图表复核。批量 OCR 默认走本地引擎，此通道用于小规模复核。"
+    }
+  },
+
+  "budget": {
+    "max_input_tokens_per_run": 200000,
+    "max_total_input_tokens": null
   }
 }

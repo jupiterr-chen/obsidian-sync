@@ -28,7 +28,9 @@ from .quality import (
 )
 
 # Versioned extraction configuration; changes must produce a new digest.
-EXTRACT_CONFIG = {"normalization": 1, "blocks": "evidence-block-v1"}
+# v2: optional OCR engine integration (PDF per-page + images).
+EXTRACT_CONFIG = {"normalization": 2, "blocks": "evidence-block-v1",
+                  "ocr": "optional-engine-v1"}
 
 STAGE_EXTRACT = "extract"
 
@@ -74,7 +76,7 @@ class ExtractorMissing(Exception):
 _EXTRACTORS: Dict[str, Callable[[bytes], ExtractionResult]] = {}
 
 
-def register_extractor(fmt: str, extractor: Callable[[bytes], ExtractionResult]) -> None:
+def register_extractor(fmt: str, extractor) -> None:
     _EXTRACTORS[fmt] = extractor
 
 
@@ -90,7 +92,7 @@ def available_extractors() -> List[str]:
 
 
 # ------------------------------------------------------------------- TXT
-def extract_txt(raw: bytes) -> ExtractionResult:
+def extract_txt(raw: bytes, **_kwargs) -> ExtractionResult:
     try:
         text = raw.decode("utf-8")
         encoding = "utf-8"
@@ -269,7 +271,7 @@ def _table_projection(rows: List[List[str]]) -> str:
     return "\n".join(lines)
 
 
-def extract_html(raw: bytes) -> ExtractionResult:
+def extract_html(raw: bytes, **_kwargs) -> ExtractionResult:
     try:
         text = raw.decode("utf-8", errors="strict")
         encoding = "utf-8"
@@ -459,7 +461,7 @@ def _pdf_content_text(content: bytes) -> Tuple[List[str], bool]:
     return pieces, cid_suspect
 
 
-def extract_pdf(raw: bytes) -> ExtractionResult:
+def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None) -> ExtractionResult:
     issues: List[str] = []
     objects = _parse_objects(raw)
     page_nums: List[int] = []
@@ -476,6 +478,9 @@ def extract_pdf(raw: bytes) -> ExtractionResult:
     per_page_chars: List[int] = []
     cid_suspect_any = False
     ocr_candidates = 0
+    ocr_applied = 0
+    max_ocr_pages = getattr(ocr_config, "max_pages_per_doc", 200)
+    render_dpi = getattr(ocr_config, "render_dpi", 200)
     for page_index, page_num in enumerate(page_nums, start=1):
         body = objects[page_num]
         contents_match = _CONTENTS_RE.search(body)
@@ -491,11 +496,28 @@ def extract_pdf(raw: bytes) -> ExtractionResult:
                 cid_suspect_any = cid_suspect_any or cid_suspect
                 page_text_parts = pieces
         page_text = "\n".join(part for part in page_text_parts if part.strip())
-        per_page_chars.append(len(page_text))
         wants_ocr, ocr_reasons = route_page_to_ocr(len(page_text), page_text)
         if wants_ocr:
             ocr_candidates += 1
             issues.append("page_%d_needs_ocr:%s" % (page_index, "+".join(ocr_reasons)))
+            if ocr is not None and ocr_applied < max_ocr_pages:
+                from .ocr import OcrEngineError, render_page_to_png
+
+                render = renderer or render_page_to_png
+                try:
+                    png = render(raw, page_index, dpi=render_dpi)
+                    ocr_text, confidence = ocr.run(png)
+                    if ocr_text.strip():
+                        page_text = (page_text + "\n" + ocr_text).strip()
+                        ocr_applied += 1
+                        issues.append("page_%d_ocr_applied:%s:conf=%.2f"
+                                      % (page_index, getattr(ocr, "name", "ocr"),
+                                         confidence))
+                except OcrEngineError as exc:
+                    issues.append("page_%d_ocr_failed:%s" % (page_index, exc))
+                except Exception as exc:  # renderer/engine errors never abort
+                    issues.append("page_%d_ocr_failed:%s" % (
+                        page_index, type(exc).__name__))
         if page_text.strip():
             blocks.append(Block(
                 block_type="paragraph", text=page_text,
@@ -520,6 +542,8 @@ def extract_pdf(raw: bytes) -> ExtractionResult:
             "chars": len(full_text),
             "chars_per_page": per_page_chars,
             "ocr_candidate_pages": ocr_candidates,
+            "ocr_applied_pages": ocr_applied,
+            "ocr_engine": getattr(ocr, "name", None) if ocr else None,
             "objects_parsed": len(objects),
         },
     )
@@ -534,8 +558,11 @@ def register_ocr_engine(name: str, engine: Any) -> None:
     _OCR_ENGINES[name] = engine
 
 
-def extract_image(raw: bytes, engine_name: Optional[str] = None) -> ExtractionResult:
-    engine = _OCR_ENGINES.get(engine_name) if engine_name else None
+def extract_image(raw: bytes, engine_name: Optional[str] = None,
+                  ocr=None, **_kwargs) -> ExtractionResult:
+    engine = ocr
+    if engine is None and engine_name:
+        engine = _OCR_ENGINES.get(engine_name)
     if engine is None:
         return ExtractionResult(
             parser_id="stdlib-image", parser_version="1", status=STATUS_REVIEW,
@@ -548,11 +575,13 @@ def extract_image(raw: bytes, engine_name: Optional[str] = None) -> ExtractionRe
     blocks = [Block(
         block_type="paragraph", text=text, locator={"kind": "image"},
     )] if text.strip() else []
+    engine_label = getattr(engine, "name", None) or engine_name or "engine"
     return ExtractionResult(
-        parser_id="stdlib-image+%s" % engine_name, parser_version="1",
+        parser_id="stdlib-image+%s" % engine_label,
+        parser_version="1",
         status=STATUS_REVIEW if issues else STATUS_READY,
         issues=issues, blocks=blocks,
-        stats={"bytes": len(raw), "ocr_engine": engine_name,
+        stats={"bytes": len(raw), "ocr_engine": engine_label,
                "ocr_confidence": confidence},
     )
 

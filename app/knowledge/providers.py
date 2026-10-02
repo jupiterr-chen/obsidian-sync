@@ -131,16 +131,34 @@ def get_provider(name: str):
     return provider
 
 
+def _is_unfilled(spec: Dict[str, Any]) -> bool:
+    """Placeholders the user has not filled in yet -> treat as absent."""
+    for key in ("api_key", "base_url", "model"):
+        value = str(spec.get(key, ""))
+        if not value or value.startswith("FILL-ME"):
+            return True
+    return False
+
+
 def load_providers(config_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Build providers from config. No credentials in repo -> none by default."""
+    """Build providers from config. No credentials in repo -> none by default.
+
+    Segments still holding FILL-ME placeholders are skipped silently (the
+    user has not filled them server-side yet); real-looking values for an
+    unimplemented kind raise instead of degrading.
+    """
     specs = config_dict.get("providers") or {}
     providers: Dict[str, Any] = {}
     for name, spec in specs.items():
+        if not isinstance(spec, dict):
+            continue
         kind = str(spec.get("kind", "")).lower()
         if kind == "mock-embedder":
             providers[name] = MockEmbedder(dimensions=int(spec.get("dimensions", 64)))
-        # real kinds intentionally unimplemented until provider+budget are set
-        elif kind:
+            continue
+        if _is_unfilled(spec):
+            continue
+        if kind:
             raise ProviderNotConfigured(
                 "provider %r of kind %r has no implementation; real providers "
                 "require user-supplied credentials and budget" % (name, kind))

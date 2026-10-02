@@ -67,6 +67,11 @@ class KnowledgeConfig:
                 setattr(clone, attr, os.path.normpath(os.path.join(base, value)))
         return clone
 
+    def ocr_config(self):
+        from .ocr import OcrConfig
+
+        return OcrConfig.from_dict(self.extra.get("ocr") or {})
+
 
 def load_knowledge_config(path: str) -> KnowledgeConfig:
     return KnowledgeConfig.load(path).resolve(os.path.dirname(os.path.abspath(path)))

@@ -181,7 +181,9 @@ class JobRunner:
         extractor = get_extractor(fmt)  # ExtractorMissing -> permanent fail
         with open(blob_path, "rb") as handle:
             raw = handle.read()
-        result = extractor(raw)
+        ocr_engine = self.ocr_engine()
+        result = extractor(raw, ocr=ocr_engine,
+                           ocr_config=self.config.ocr_config())
         extraction_id = compute_extraction_id(
             job["source"], job["doc_id"], job["version_id"], snap["sha256"],
             result.parser_id, result.parser_version, self.extract_digest,
@@ -213,6 +215,18 @@ class JobRunner:
              "issues": result.issues[:10]},
             event_id="evt-extr-" + extraction_id[:32])
         return extraction_id
+
+    def ocr_engine(self):
+        from .ocr import build_ocr_engine
+
+        try:
+            return build_ocr_engine(
+                self.config.ocr_config(),
+                provider_specs=(self.config.extra.get("providers") or {}))
+        except Exception:
+            # vision-api selected but unfilled: run without OCR and let the
+            # extraction flag needs_ocr honestly instead of failing the job
+            return None
 
     def status(self) -> Dict[str, Any]:
         counts = self.kb.job_counts("snapshot")
