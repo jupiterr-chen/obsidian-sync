@@ -93,9 +93,13 @@ def main() -> int:
     # phase a: catalog-only sample plan (identities fixed before any
     # processing, so the sample cannot be biased by extraction results)
     catalog_db = os.path.join(args.out_dir, "sample-plan.sqlite3")
+    if os.path.exists(catalog_db):
+        os.unlink(catalog_db)
     plan_store = KnowledgeStore(catalog_db)
     try:
-        plan_store.upsert_documents([dict(r) for r in rows], "2026-10-03")
+        stamp = "2026-10-03T00:00:00Z"
+        plan_store.upsert_documents([dict(r) for r in rows], stamp)
+        plan_store.upsert_versions([dict(r) for r in rows], stamp)
         plan = select_sample(plan_store, total=args.total, tune=args.tune,
                              blind=args.blind, seed=args.seed).to_manifest()
     finally:
