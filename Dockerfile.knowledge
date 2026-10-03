@@ -17,6 +17,6 @@ RUN pip install --no-cache-dir -r /app/requirements-knowledge.txt && \
     # the warm-up pre-bundles the default PP-OCR models into the image so
     # containers never download models at runtime (offline reproducibility)
 
-COPY app /app/app
+COPY app/ /app/
 
 CMD ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
