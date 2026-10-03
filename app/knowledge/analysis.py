@@ -34,9 +34,12 @@ def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
     """Embed through the budget ledger when one is attached (R01).
 
     Without a ledger (offline/mock paths) usage is still recorded on the
-    caller's store so spend stays observable."""
+    caller's store so spend stays observable. Returned vector shape is
+    validated (R09): a provider answering with the wrong count or dimension
+    fails loudly instead of corrupting the cache."""
     if ledger is None:
         vectors, usage = embedder.embed(texts)
+        _validate_vectors(embedder, texts, vectors)
         if kb is not None:
             kb.record_usage(usage.provider, usage.model, "embedding",
                             usage.input_tokens, usage.output_tokens,
@@ -49,8 +52,23 @@ def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
     except Exception:
         ledger.fail_unknown(reservation)
         raise
+    try:
+        _validate_vectors(embedder, texts, vectors)
+    except ValueError:
+        ledger.release(reservation)
+        raise
     ledger.settle(reservation, usage)
     return vectors, usage
+
+
+def _validate_vectors(embedder, texts, vectors) -> None:
+    if len(vectors) != len(texts):
+        raise ValueError("embedding provider returned %d vectors for %d texts"
+                         % (len(vectors), len(texts)))
+    expected_dims = getattr(embedder, "dimensions", 0) or 0
+    if vectors and expected_dims and len(vectors[0]) != expected_dims:
+        raise ValueError("embedding dimension mismatch: %d != %d"
+                         % (len(vectors[0]), expected_dims))
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -81,19 +99,26 @@ def hybrid_search(kb: KnowledgeStore, query: str,
                   limit: int = 20, embed_top: int = 200,
                   ledger: Optional[BudgetLedger] = None
                   ) -> Dict[str, Any]:
-    """Keyword + vector recall fused with RRF (P4-02)."""
+    """Keyword + vector recall fused with RRF (P4-02).
+
+    R09: the candidate pool is ALWAYS the filter-approved set - keyword hits
+    narrow it further, and the semantic fallback draws from the SAME
+    approved set, never from the raw index. Filters (sources/symbols/dates/
+    as_of/collections) apply BEFORE any embedding call, so disallowed text
+    cannot leave the box via this path."""
+    from .indexing import allowed_block_ids
+
     kw = keyword_search(kb, query, filters, limit=embed_top)
     if not kw.get("ok"):
         return kw
-    # candidate pool: everything the keyword side can see
-    pool_ids = [hit.block["block_id"] for hit in kw["hits"]]
-    # when the keyword side finds nothing, fall back to the whole active index
-    if not pool_ids:
-        with kb._lock:
-            rows = kb._conn.execute(
-                "SELECT block_id FROM index_doc_terms WHERE generation_id=?",
-                (kw["generation_id"],)).fetchall()
-        pool_ids = [r["block_id"] for r in rows][:embed_top]
+    allowed = allowed_block_ids(kb, filters)
+    if not allowed:
+        return {"ok": True, "generation_id": kw["generation_id"],
+                "hits": [], "terms": kw.get("terms", [])}
+    allowed_set = set(allowed)
+    keyword_ids = [hit.block["block_id"] for hit in kw["hits"]
+                   if hit.block["block_id"] in allowed_set]
+    pool_ids = keyword_ids or allowed[:embed_top]
     ensure_block_embeddings(kb, embedder, pool_ids, ledger=ledger)
     vectors, _q_usage = budgeted_embed(embedder, [query], ledger=ledger, kb=kb)
     query_vec = vectors[0]

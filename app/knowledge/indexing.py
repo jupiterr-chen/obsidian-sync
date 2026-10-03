@@ -67,6 +67,19 @@ class SearchFilters:
 SELECTION_POLICY = "current-version-latest-extraction-v1"
 
 
+SELECTION_SQL = (
+    "SELECT extraction_id FROM ("
+    "  SELECT e2.extraction_id,"
+    "         ROW_NUMBER() OVER ("
+    "           PARTITION BY e2.source, e2.doc_id"
+    "           ORDER BY e2.created_at DESC, e2.extraction_id DESC) AS rn"
+    "  FROM extractions e2"
+    "  JOIN kb_versions v ON v.source = e2.source"
+    "     AND v.doc_id = e2.doc_id AND v.version_id = e2.version_id"
+    "  WHERE v.is_current = 1 AND e2.status != 'failed'"
+    " ) WHERE rn = 1")
+
+
 def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
     """R08/ADR0007: index only the CURRENT source version per document,
     using that version's latest non-failed extraction (deterministic
@@ -77,19 +90,35 @@ def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
         rows = kb._conn.execute(
             "SELECT b.block_id, b.text, b.extraction_id FROM blocks b"
             " JOIN extractions e ON e.extraction_id = b.extraction_id"
-            " WHERE e.extraction_id IN ("
-            "   SELECT extraction_id FROM ("
-            "     SELECT e2.extraction_id,"
-            "            ROW_NUMBER() OVER ("
-            "              PARTITION BY e2.source, e2.doc_id"
-            "              ORDER BY e2.created_at DESC, e2.extraction_id DESC) AS rn"
-            "     FROM extractions e2"
-            "     JOIN kb_versions v ON v.source = e2.source"
-            "        AND v.doc_id = e2.doc_id AND v.version_id = e2.version_id"
-            "     WHERE v.is_current = 1 AND e2.status != 'failed')"
-            "   WHERE rn = 1)"
+            " WHERE e.extraction_id IN (" + SELECTION_SQL + ")"
             " ORDER BY b.extraction_id, b.ordinal").fetchall()
     return rows
+
+
+def allowed_block_ids(kb: KnowledgeStore,
+                      filters: Optional["SearchFilters"]) -> List[str]:
+    """R09: the complete filter-approved candidate set, computed BEFORE any
+    embedding or recall - semantic fallback pools may never bypass
+    source/symbol/date/as_of filtering."""
+    filters = filters or SearchFilters()
+    where, params = _document_filter_sql(filters)
+    clause = " AND ".join(where)
+    version_join = " JOIN kb_versions v ON v.source = b_v.source" \
+                   " AND v.doc_id = b_v.doc_id AND v.version_id = b_v.version_id"
+    version_where = ""
+    if filters.as_of and filters.as_of_mode == "system":
+        version_where = (" AND v.first_observed_at IS NOT NULL"
+                         " AND v.first_observed_at <= ?")
+        params = list(params) + [filters.as_of]
+    sql = ("SELECT b.block_id FROM blocks b"
+           " JOIN extractions b_v ON b_v.extraction_id = b.extraction_id"
+           + version_join +
+           " JOIN kb_documents d ON d.source = b_v.source AND d.doc_id = b_v.doc_id"
+           " WHERE b.extraction_id IN (" + SELECTION_SQL + ")"
+           " AND " + clause + version_where)
+    with kb._lock:
+        rows = kb._conn.execute(sql, params).fetchall()
+    return [row["block_id"] for row in rows]
 
 
 def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
@@ -243,10 +272,11 @@ def search(kb: KnowledgeStore, query: str, filters: Optional[SearchFilters] = No
             scores[block_id] = scores.get(block_id, 0.0) + idf * norm
             matched.setdefault(block_id, []).append(term)
 
-    candidates = sorted(scores, key=lambda bid: -scores[bid])
+    # R12: deterministic total order (score desc, block_id asc as tiebreak)
+    candidates = sorted(scores, key=lambda bid: (-scores[bid], bid))
     # fetch blocks + document metadata for filter application
     hits: List[SearchHit] = []
-    limit = max(1, min(int(limit), 100))
+    limit = max(1, min(int(limit), 1000))
     where, params = _document_filter_sql(filters)
     for block_id in candidates:
         if len(hits) >= limit:

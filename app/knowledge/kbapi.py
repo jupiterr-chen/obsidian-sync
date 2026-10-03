@@ -27,6 +27,7 @@ from .schema import validate_evidence_block
 from .store import KnowledgeStore
 
 PERM_READ = "research.read"
+RESULT_WINDOW_MAX = 1000  # R12: hard pagination window
 PERM_ADMIN_JOBS = "admin.jobs"
 
 
@@ -58,7 +59,8 @@ class KbApi:
 
     def __init__(self, kb: KnowledgeStore, tokens: Dict[str, List[str]],
                  embedder: Any = None, chat: Any = None,
-                 budget: Any = None, vision: Any = None):
+                 budget: Any = None, vision: Any = None,
+                 snapshot_root: str = "state/snapshots"):
         from .budget import Budget, BudgetLedger
 
         self.kb = kb
@@ -68,6 +70,7 @@ class KbApi:
         self.vision = vision
         self.budget = budget if budget is not None else Budget()
         self.ledger = BudgetLedger(kb, self.budget)
+        self.snapshot_root = snapshot_root
 
     def attach_providers(self, chat: Any = None, embedder: Any = None,
                          vision: Any = None) -> None:
@@ -105,12 +108,22 @@ class KbApi:
         mode = body.get("mode", "keyword")
         if mode not in ("keyword", "hybrid"):
             raise KbApiError(400, "invalid_mode", "mode must be keyword|hybrid")
-        if mode == "hybrid" and self.embedder is None:
-            raise KbApiError(422, "mode_unavailable",
-                             "mode %r is not enabled in this deployment" % mode)
         raw_filters = body.get("filters") or {}
         if not isinstance(raw_filters, dict):
             raise KbApiError(400, "invalid_filters", "filters must be an object")
+        # R12: cursor identity is validated FIRST - a cursor from another
+        # query/mode/generation must 409 even when the mode itself is
+        # unavailable in this deployment
+        pre_cursor = body.get("cursor")
+        if pre_cursor:
+            decoded = decode_cursor(pre_cursor)
+            if decoded.get("digest") != self._query_digest(query, raw_filters,
+                                                           mode):
+                raise KbApiError(409, "cursor_expired",
+                                 "cursor belongs to a different query or mode")
+        if mode == "hybrid" and self.embedder is None:
+            raise KbApiError(422, "mode_unavailable",
+                             "mode %r is not enabled in this deployment" % mode)
         if raw_filters.get("collections") not in (None, ["source_documents"]):
             raise KbApiError(403, "forbidden",
                              "no accessible collections match the filter")
@@ -132,21 +145,32 @@ class KbApi:
         offset = 0
         if cursor:
             decoded = decode_cursor(cursor)
-            digest = self._query_digest(query, raw_filters)
+            digest = self._query_digest(query, raw_filters, mode)
             if decoded.get("digest") != digest:
                 raise KbApiError(409, "cursor_expired",
-                                 "cursor belongs to a different query")
+                                 "cursor belongs to a different query or mode")
             active = self.kb.active_generation()
             if active and decoded.get("generation") != active["generation_id"]:
                 raise KbApiError(409, "cursor_expired",
                                  "index generation changed since the cursor was issued")
-            offset = int(decoded.get("offset", 0))
+            try:
+                offset = int(decoded.get("offset", 0))
+            except (TypeError, ValueError):
+                raise KbApiError(400, "invalid_cursor", "cursor offset invalid")
 
+        # R12: fetch the FULL window up to this page's end so offset slicing
+        # sees every qualifying row (the old limit+1 recall truncated
+        # traversal after page two).
+        window = offset + limit + 1
+        if window > RESULT_WINDOW_MAX:
+            raise KbApiError(422, "result_window_exceeded",
+                             "pagination window exceeds %d hits; refine the"
+                             " query" % RESULT_WINDOW_MAX, retryable=False)
         if mode == "hybrid":
             from .analysis import hybrid_search
 
             result = hybrid_search(self.kb, query, self.embedder, filters,
-                                   limit=limit + 1, ledger=self.ledger)
+                                   limit=window, ledger=self.ledger)
             if not result.get("ok"):
                 if str(result.get("error", "")).startswith("budget"):
                     raise KbApiError(429, "budget_exceeded",
@@ -158,7 +182,7 @@ class KbApi:
                                     matched_terms=h.get("matched_terms", []))
                     for h in result["hits"]]
         else:
-            result = search(self.kb, query, filters, limit=limit + 1)
+            result = search(self.kb, query, filters, limit=window)
             if not result.get("ok"):
                 raise KbApiError(503, "not_ready", result.get("error", "not ready"))
             hits = result["hits"]
@@ -166,7 +190,7 @@ class KbApi:
         next_cursor = None
         if offset + limit < len(hits):
             next_cursor = encode_cursor({
-                "digest": self._query_digest(query, raw_filters),
+                "digest": self._query_digest(query, raw_filters, mode),
                 "generation": result["generation_id"],
                 "offset": offset + limit,
             })
@@ -179,9 +203,12 @@ class KbApi:
             "next_cursor": next_cursor,
         }
 
-    def _query_digest(self, query: str, filters: Dict[str, Any]) -> str:
-        canonical = json.dumps({"q": query, "f": filters}, ensure_ascii=False,
-                               sort_keys=True)
+    def _query_digest(self, query: str, filters: Dict[str, Any],
+                      mode: str = "keyword") -> str:
+        # R12: mode is part of the cursor identity - a keyword cursor must
+        # not be replayed against a hybrid result set
+        canonical = json.dumps({"q": query, "f": filters, "m": mode},
+                               ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
     def _hit_to_json(self, hit) -> Dict[str, Any]:
@@ -237,12 +264,56 @@ class KbApi:
         doc = self.document(source, doc_id)
         for version in doc["versions"]:
             if version["version_id"] == version_id:
+                version = dict(version)
+                # R11: link the immutable byte snapshot for this fixed version
+                version["snapshot_url"] = "/api/kb/v1/snapshots/%s/%s/%s" % (
+                    source, doc_id, version_id)
+                snap = self.kb.get_snapshot(source, doc_id, version_id)
+                if snap is not None:
+                    version["snapshot_sha256"] = snap["sha256"]
+                    version["snapshot_state"] = snap.get("state", "verified")
+                else:
+                    version["snapshot_state"] = "not_taken"
                 return {"source": source, "doc_id": doc_id, "version": version,
                         "document": {k: doc[k] for k in
                                      ("title", "display_title", "market", "symbol",
                                       "doc_type", "report_period", "filing_date",
                                       "published_at", "report_date", "first_seen_at")}}
         raise KbApiError(404, "not_found", "version not found")
+
+    def snapshot_bytes(self, source: str, doc_id: str,
+                       version_id: str) -> Dict[str, Any]:
+        """R11: serve the immutable byte snapshot of a fixed version.
+
+        The stored blob is re-verified (sha256+size) against the recorded
+        identity on every read - sealing time is not a permanent disk
+        integrity proof (R04 lineage).
+        """
+        snap = self.kb.get_snapshot(source, doc_id, version_id)
+        if snap is None:
+            raise KbApiError(404, "not_found", "snapshot not taken")
+        from .snapshot import SnapshotStore
+
+        blobs = SnapshotStore(self.snapshot_root)
+        state = blobs.verify_blob(snap["store_path"], snap["sha256"],
+                                  snap["bytes"])
+        if state is None:
+            raise KbApiError(404, "not_found", "snapshot blob missing")
+        if state is False:
+            self.kb.mark_snapshot_state(source, doc_id, version_id, "corrupted")
+            raise KbApiError(409, "snapshot_corrupted",
+                             "stored bytes fail identity verification")
+        path = os.path.join(blobs.root, *snap["store_path"].split("/"))
+        with open(path, "rb") as handle:
+            data = handle.read()
+        version_row = self.kb.get_version(source, doc_id, version_id) or {}
+        media_type = version_row.get("media_type") or "application/octet-stream"
+        filename = "%s_%s" % (doc_id, version_id)
+        ext = version_row.get("ext")
+        if ext:
+            filename += "." + ext
+        return {"data": data, "media_type": media_type, "filename": filename,
+                "etag": '"%s"' % snap["sha256"]}
 
     def evidence(self, block_id: str) -> Dict[str, Any]:
         row = self.kb.get_block_with_identity(block_id)
@@ -483,10 +554,17 @@ class Handler(BaseHTTPRequestHandler):
                 if len(route) == 3:
                     return self._send(200, self.api.document(route[1], route[2]),
                                       head_only)
-                if len(route) == 6 and route[3] == "versions":
+                if len(route) == 5 and route[3] == "versions":
+                    # documents/{s}/{d}/versions/{v} - R11: the old length
+                    # check made every fixed-version URL 404
                     return self._send(200, self.api.document_version(
-                        route[1], route[2], route[5]), head_only)
+                        route[1], route[2], route[4]), head_only)
                 raise KbApiError(404, "not_found", "not found")
+
+            if route[:1] == ["snapshots"] and len(route) == 4                     and self.command == "GET":
+                self.api.authenticate(self._bearer(), PERM_READ)
+                payload = self.api.snapshot_bytes(route[1], route[2], route[3])
+                return self._send_blob(payload, head_only)
 
             if route[:1] == ["evidence"] and len(route) == 2:
                 self.api.authenticate(self._bearer(), PERM_READ)
@@ -535,6 +613,26 @@ class Handler(BaseHTTPRequestHandler):
             self._log_exception()
             self._error(KbApiError(500, "internal_error", "internal error"), head_only)
 
+    def _send_blob(self, payload: Dict[str, Any], head_only: bool) -> None:
+        body = payload["data"]
+        self.send_response(200)
+        self.send_header("Content-Type", payload["media_type"])
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("ETag", payload["etag"])
+        self.send_header("Accept-Ranges", "none")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition",
+                         'inline; filename="%s"' % payload["filename"])
+        if str(payload["media_type"]).startswith("text/html"):
+            self.send_header(
+                "Content-Security-Policy",
+                "sandbox; default-src 'none'; img-src data:;"
+                " style-src 'unsafe-inline'; base-uri 'none';"
+                " form-action 'none'")
+        self.end_headers()
+        if not head_only:
+            self.wfile.write(body)
+
     def _read_json_body(self) -> Dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
@@ -568,9 +666,10 @@ class Handler(BaseHTTPRequestHandler):
 def build_kb_server(kb: KnowledgeStore, tokens: Dict[str, List[str]],
                     host: str = "127.0.0.1", port: int = 8766,
                     embedder: Any = None, chat: Any = None,
-                    budget: Any = None, vision: Any = None) -> ThreadingHTTPServer:
+                    budget: Any = None, vision: Any = None,
+                    snapshot_root: str = "state/snapshots") -> ThreadingHTTPServer:
     api = KbApi(kb, tokens, embedder=embedder, chat=chat, budget=budget,
-                vision=vision)
+                vision=vision, snapshot_root=snapshot_root)
     handler = type("BoundKbHandler", (Handler,), {"api": api})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
