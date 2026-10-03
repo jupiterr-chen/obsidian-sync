@@ -15,6 +15,5 @@ RUN pip install --no-cache-dir -r /app/requirements-knowledge.txt && \
     # containers never download models at runtime (offline reproducibility)
 
 COPY app /app/app
-COPY contracts /app/contracts
 
 CMD ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
