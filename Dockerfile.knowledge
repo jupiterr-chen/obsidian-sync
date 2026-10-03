@@ -3,6 +3,9 @@
 # the plain Dockerfile remains the stdlib-only first-layer image.
 FROM python:3.11-slim
 
+# OpenCV runtime libraries (headless still needs libxcb/glib on slim)
+RUN apt-get update && apt-get install -y --no-install-recommends     libglib2.0-0 libgl1 libxcb1 libsm6 libxext6 libxrender1     && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
