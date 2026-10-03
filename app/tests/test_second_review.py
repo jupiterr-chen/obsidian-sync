@@ -750,17 +750,23 @@ class S10IndependentRecallTest(unittest.TestCase):
             block_id = "extr-d1-b0000"
             from knowledge.analysis import ensure_block_embeddings
 
+            # T06: cache rows are keyed by provider semantic identity +
+            # model + dims (embedding_cache_key), not bare model name
+            from knowledge.analysis import embedding_cache_key
+
             embedder_a = MockEmbedder(dimensions=8)
             embedder_a.model = "shared-name"
+            embedder_a.name = "provider-a"
             embedder_b = MockEmbedder(dimensions=16)
             embedder_b.model = "shared-name"  # same name, other dims
+            embedder_b.name = "provider-b"
             ensure_block_embeddings(kb, embedder_a, [block_id])
-            vector = kb.get_embedding("shared-name", block_id)
+            vector = kb.get_embedding(embedding_cache_key(embedder_a), block_id)
             self.assertIsNotNone(vector)
             self.assertEqual(len(vector), 8)
             # the 16-dim provider must NOT reuse the 8-dim cache entry
             ensure_block_embeddings(kb, embedder_b, [block_id])
-            vector_b = kb.get_embedding_for("shared-name", 16, block_id)
+            vector_b = kb.get_embedding(embedding_cache_key(embedder_b), block_id)
             self.assertIsNotNone(vector_b)
             self.assertEqual(len(vector_b), 16)
         finally:

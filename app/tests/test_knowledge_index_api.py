@@ -145,13 +145,15 @@ class IndexSearchTest(unittest.TestCase):
         result = search(self.kb, "margin", SearchFilters(
             as_of="2026-07-01T00:00:00Z", as_of_mode="public"))
         self.assertEqual(result["hits"], [])
+        # T03: evidence must not predate the stored first observation
+        # (2026-10-01 in this fixture)
         self.kb.upsert_documents([dict(_doc("reports", "R1", "EXAMPLE"),
-                                      published_at="2026-06-30T00:00:00Z")],
-                                 "2026-07-01T00:00:00Z")
+                                      published_at="2026-10-01T00:00:00Z")],
+                                 "2026-10-01T00:00:00Z")
         self.kb.upsert_versions([_version("reports", "R1", "v1", "a" * 64)],
-                                "2026-07-01T00:00:00Z")
+                                "2026-10-01T00:00:00Z")
         result = search(self.kb, "margin", SearchFilters(
-            as_of="2026-07-01T00:00:00Z", as_of_mode="public"))
+            as_of="2026-10-02T00:00:00Z", as_of_mode="public"))
         self.assertGreater(len(result["hits"]), 0)
         # unknown collections are rejected at the API layer, not here
 

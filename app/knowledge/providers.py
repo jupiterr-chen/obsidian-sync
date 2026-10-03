@@ -9,6 +9,7 @@ never be presented as quality or cost evidence (docs/09, docs/13 V4).
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -96,12 +97,9 @@ class _HttpProvider:
         body = json_mod.dumps(payload, ensure_ascii=False).encode("utf-8")
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
-            request = urllib.request.Request(url, data=body, method="POST")
-            request.add_header("Authorization", "Bearer %s" % self.api_key)
-            request.add_header("Content-Type", "application/json")
+            self._gate_attempt()  # T02: retries are gated too
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                    return json_mod.loads(response.read().decode("utf-8"))
+                return self._transport(url, body)
             except urllib.error.HTTPError as exc:
                 detail = ""
                 try:
@@ -120,6 +118,28 @@ class _HttpProvider:
                 if attempt >= self.max_retries:
                     raise last_error
         raise last_error or ProviderCallError("unreachable", retryable=True)
+
+    def _transport(self, url: str, body: bytes) -> Dict[str, Any]:
+        """One physical HTTP POST (override seam for tests/transport layers)."""
+        import urllib.request
+
+        request = urllib.request.Request(url, data=body, method="POST")
+        request.add_header("Authorization", "Bearer %s" % self.api_key)
+        request.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _gate_attempt(self) -> None:
+        """T02: every PHYSICAL attempt - including internal retries - passes
+        the request gate; a budget rejection aborts before any bytes go."""
+        if getattr(self, "attempt_ledger", None) is not None:
+            from .budget import BudgetExceeded
+
+            try:
+                self.attempt_ledger.reserve("http-attempt", 1)
+            except BudgetExceeded:
+                raise ProviderCallError(
+                    "request budget exhausted before attempt", retryable=False)
 
     def _require_egress(self) -> None:
         if not self.egress_allowed:

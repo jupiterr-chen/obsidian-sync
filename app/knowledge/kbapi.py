@@ -220,24 +220,26 @@ class KbApi:
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
     def metadata_epoch(self) -> str:
-        """S08: digest of every revision-prone column that search filters
-        read at query time (available/symbol/doc_type/dates). Any metadata
-        change flips the epoch, so stale cursors fail with 409 instead of
-        silently skipping pages; revocation stays effective mid-pagination."""
+        """S08/T04: digest over the VALUES of every revision-prone field
+        that search filters read (available/symbol/doc_type/dates/source),
+        plus version-level public-time bases. Length/count sums miss
+        same-length edits and offsetting changes; hashing the normalized
+        row stream catches both."""
         with self.kb._lock:
-            row = self.kb._conn.execute(
-                "SELECT COUNT(*) c, COALESCE(SUM("
-                "  (CASE WHEN available=1 THEN 1 ELSE 0 END)"
-                "  + LENGTH(COALESCE(UPPER(symbol),''))"
-                "  + LENGTH(COALESCE(doc_type,''))"
-                "  + LENGTH(COALESCE(report_date,''))"
-                "  + LENGTH(COALESCE(published_at,''))"
-                "  + LENGTH(COALESCE(filing_date,''))"
-                "  + LENGTH(COALESCE(source,''))"
-                "), 0) s FROM kb_documents").fetchone()
-            # include row content ordering-independently: c + weighted sum
-            # of the filter-relevant fields; cheap and conservative
-            epoch_source = "c=%d;s=%d" % (row["c"], row["s"])
+            rows = self.kb._conn.execute(
+                "SELECT source, doc_id, UPPER(COALESCE(symbol,'')),"
+                " COALESCE(doc_type,''), COALESCE(report_date,''),"
+                " COALESCE(published_at,''), COALESCE(filing_date,''),"
+                " CASE WHEN available=1 THEN 1 ELSE 0 END AS avail"
+                " FROM kb_documents ORDER BY source, doc_id").fetchall()
+            version_rows = self.kb._conn.execute(
+                "SELECT source, doc_id, version_id, public_available_at"
+                " FROM kb_versions WHERE is_current=1"
+                " ORDER BY source, doc_id").fetchall()
+        parts = ["|".join(str(r[i]) for i in range(8)) for r in rows]
+        parts += ["v:" + "|".join(str(r[i]) for i in range(4))
+                  for r in version_rows]
+        epoch_source = "\n".join(parts)
         return hashlib.sha256(epoch_source.encode("utf-8")).hexdigest()[:12]
 
     def _hit_to_json(self, hit) -> Dict[str, Any]:

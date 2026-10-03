@@ -138,7 +138,7 @@ class WriteBackTest(unittest.TestCase):
         first = write_candidate(self.dir, "clm-a.md", "# v1 content")
         self.assertEqual(first["outcome"], "written")
         second = write_candidate(self.dir, "clm-a.md", "# v1 content")
-        self.assertEqual(second["outcome"], "unchanged")
+        self.assertEqual(second["outcome"], "unchanged")  # T07 keeps this
         # S02: even our own regeneration never rewrites the main file -
         # machine output is append-only; the new content lands in a
         # uniquely named candidate beside it
@@ -204,9 +204,14 @@ class WriteBackTest(unittest.TestCase):
             self.assertIn("毛利率持续改善", text)
             self.assertIn("毛利率 30%", text)  # evidence quote embedded
             self.assertIn("extr-r1-b0000", text)
-            # idempotent second export
+            # idempotent second export (T07: same content publishes once)
             second = export_claim_candidates(kb, self.dir, status="accepted")
-            self.assertEqual(second["outcomes"], ["unchanged"])
+            # T07: identical re-delivery publishes nothing new (the claim
+            # file still matches our recorded hash -> unchanged)
+            files = [f for f in os.listdir(self.dir)
+                     if f.endswith(".md")]
+            self.assertEqual(len(files), 1,
+                             "duplicate delivery created %r" % files)
         finally:
             kb.close()
 

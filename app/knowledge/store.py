@@ -201,8 +201,6 @@ CREATE TABLE IF NOT EXISTS usage_events (
     reservation_id INTEGER UNIQUE     -- S01: idempotent settlement link
 );
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_reservation
-    ON usage_events(reservation_id) WHERE reservation_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS budget_reservations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -301,6 +299,18 @@ def idempotency_key(source: str, doc_id: str, version_id: str, stage: str,
     return hashlib.sha256(parts.encode("utf-8")).hexdigest()
 
 
+# Indexes that reference MIGRATED columns live here, NOT in SCHEMA:
+# executescript(SCHEMA) runs before _migrate() adds those columns, so an
+# index on e.g. usage_events.reservation_id would break every pre-upgrade
+# database on open (T01). They are (re)created after the columns exist.
+POST_MIGRATION_INDEXES = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_reservation"
+    " ON usage_events(reservation_id) WHERE reservation_id IS NOT NULL",
+)
+
+SCHEMA_VERSION = 2
+
+
 class KnowledgeStore:
     def __init__(self, path: str):
         self.path = path
@@ -318,13 +328,21 @@ class KnowledgeStore:
         self._conn.commit()
 
     def _migrate(self) -> None:
-        """Non-destructive column additions for pre-existing databases."""
+        """Non-destructive, versioned, order-explicit upgrades (T01).
+
+        Columns are added BEFORE any index that references them; every step
+        is idempotent (column/index existence checks); PRAGMA user_version
+        records the applied level. A failure mid-way leaves earlier steps
+        applied and the database openable - nothing is dropped or rebuilt.
+        """
+        version = self._conn.execute("PRAGMA user_version").fetchone()[0]
         migrations = (
             ("snapshots", "state", "TEXT NOT NULL DEFAULT 'verified'"),
             ("kb_versions", "first_observed_at", "TEXT"),
             ("kb_versions", "public_available_at", "TEXT"),
             ("kb_versions", "public_time_basis", "TEXT"),
             ("usage_events", "reservation_id", "INTEGER"),
+            ("kb_documents", "revision", "INTEGER NOT NULL DEFAULT 1"),
         )
         for table, column, decl in migrations:
             columns = {row[1] for row in self._conn.execute(
@@ -332,6 +350,11 @@ class KnowledgeStore:
             if column not in columns:
                 self._conn.execute(
                     "ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
+        # dependent indexes only after their columns exist
+        for statement in POST_MIGRATION_INDEXES:
+            self._conn.execute(statement)
+        if version < SCHEMA_VERSION:
+            self._conn.execute("PRAGMA user_version = %d" % SCHEMA_VERSION)
         # R08: pre-existing rows keep first_observed_at NULL = unknown.
         # Fabricating an observation time from the current sync stamp would
         # let historical as_of queries claim knowledge this system never
@@ -401,10 +424,11 @@ class KnowledgeStore:
                 if not exists:
                     new_versions += 1
                     new_rows.append(row)
-                # S03: version-level PUBLIC availability basis. publication
-                # evidence (published_at/filing_date) outranks the report
-                # period - a period end never impersonates a publication
-                # time; without any basis the value stays unknown (NULL).
+                # T03: version-level PUBLIC availability basis. Only a
+                # source adapter that can bind publication evidence to THIS
+                # version (row-carried public_*) may set it; the document's
+                # dates describe v1's publication and are NEVER copied onto
+                # later revisions (a revision needs its own evidence).
                 public_at = row.get("public_available_at")
                 public_basis = row.get("public_time_basis")
                 if not public_at:
@@ -412,13 +436,33 @@ class KnowledgeStore:
                         "SELECT published_at, filing_date FROM kb_documents"
                         " WHERE source=? AND doc_id=?",
                         (row["source"], row["doc_id"])).fetchone()
-                    if doc_row and doc_row["published_at"]:
-                        public_at = doc_row["published_at"]
+                    doc_published = doc_row["published_at"] if doc_row else None
+                    doc_filed = doc_row["filing_date"] if doc_row else None
+                    # the version's true first observation: the STORED value
+                    # for existing rows (the incoming synced_at refreshes on
+                    # every reconciliation and would falsely "delay" v1)
+                    stored = conn.execute(
+                        "SELECT first_observed_at FROM kb_versions"
+                        " WHERE source=? AND doc_id=? AND version_id=?",
+                        (row["source"], row["doc_id"],
+                         row["version_id"])).fetchone()
+                    row_first = None
+                    if stored and stored["first_observed_at"]:
+                        row_first = stored["first_observed_at"]
+                    elif not stored:
+                        row_first = (row.get("first_observed_at")
+                                     or row.get("synced_at"))
+                    if doc_published and (not row_first or doc_published >= row_first):
+                        # publication evidence is not OLDER than the
+                        # version's first observation -> it can describe it
+                        public_at = doc_published
                         public_basis = "published_at"
-                    elif doc_row and doc_row["filing_date"]:
-                        public_at = doc_row["filing_date"]
+                    elif doc_filed and (not row_first or doc_filed >= row_first):
+                        public_at = doc_filed
                         public_basis = "filing_date"
                     else:
+                        # document dates predate this version: they prove
+                        # nothing about the revision -> unknown
                         public_at, public_basis = None, "unknown"
                 conn.execute(
                     "INSERT INTO kb_versions ("
@@ -1227,7 +1271,7 @@ class KnowledgeStore:
         with self._lock:
             row = self._conn.execute(
                 "SELECT * FROM extractions WHERE source=? AND doc_id=? AND version_id=?"
-                " ORDER BY created_at DESC, extraction_id LIMIT 1",
+                " ORDER BY rowid DESC LIMIT 1",
                 (source, doc_id, version_id)).fetchone()
         if not row:
             return None

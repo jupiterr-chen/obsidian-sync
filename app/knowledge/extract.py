@@ -33,8 +33,13 @@ from .quality import (
 # engine/dpi/languages/thresholds/fallback, vision model NAME (never the key),
 # quality policy version and processing-library versions - so any behavioral
 # change yields a new task identity and identical configs rerun for free.
-EXTRACT_CONFIG = {"normalization": 4, "blocks": "evidence-block-v1",
-                  "ocr": "effective-config-v1"}
+# v5 (T05): per-page confidence/status gating (page_confidences,
+# page_ocr_status, empty-OCR/fallback-failure degradation) changed output
+# behavior - the recipe version bump forces a new identity so old products
+# are never silently reused.
+EXTRACT_CONFIG = {"normalization": 5, "blocks": "evidence-block-v1",
+                  "ocr": "effective-config-v2",
+                  "quality_gate": "page-status-v1"}
 
 STAGE_EXTRACT = "extract"
 
@@ -58,9 +63,11 @@ def effective_extract_config(ocr_config=None,
     cfg = ocr_config or OcrConfig()
     specs = provider_specs or {}
     vision_used = cfg.engine == "vision-api" or cfg.fallback == "vision-api"
+    import copy
+
     return {
         "extract": EXTRACT_CONFIG,
-        "quality": QUALITY_CONFIG,
+        "quality": copy.deepcopy(QUALITY_CONFIG),
         "ocr": {
             "engine": cfg.engine,
             "fallback": cfg.fallback,
@@ -743,9 +750,16 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                                 confidence = max(confidence, fb_conf)
                                 engine_label = getattr(fallback_ocr, "name",
                                                        "fallback")
+                            else:
+                                page_status = "ocr_empty_after_fallback"
                         except Exception:  # fallback failure is non-fatal
                             issues.append("page_%d_ocr_fallback_failed"
                                           % page_index)
+                            page_status = "ocr_fallback_failed"
+                    if not ocr_text.strip():
+                        # T05: an OCR page that yielded NOTHING (with or
+                        # without a fallback attempt) is unmet, not text
+                        page_status = "needs_ocr_unmet"
                     if ocr_text.strip():
                         page_text = (page_text + "\n" + ocr_text).strip()
                         ocr_applied += 1
@@ -774,7 +788,8 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
         page_ocr_status.append(page_status)
         page_quality = Quality(STATUS_READY)
         if page_status in ("ocr_low_confidence", "ocr_failed",
-                           "needs_ocr_unmet", "missing_content"):
+                           "needs_ocr_unmet", "missing_content",
+                           "ocr_empty_after_fallback", "ocr_fallback_failed"):
             page_quality = Quality(STATUS_REVIEW, [page_status])
         if page_text.strip():
             blocks.append(Block(
@@ -793,7 +808,11 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
     # degrade the document below ready - remaining text volume is not proof.
     page_problems = (unmet_ocr_pages > 0 or missing_content_pages > 0
                      or low_confidence_pages > 0
-                     or any("ocr_failed" in i for i in merged_issues))
+                     or any(s in ("needs_ocr_unmet", "ocr_empty_after_fallback",
+                                  "ocr_fallback_failed", "ocr_failed")
+                            for s in page_ocr_status)
+                     or any("ocr_failed" in i or "fallback_failed" in i
+                            for i in merged_issues))
     status = merge_statuses(quality.status,
                             STATUS_REVIEW if page_problems else STATUS_READY,
                             STATUS_REVIEW if cid_suspect_any else STATUS_READY)

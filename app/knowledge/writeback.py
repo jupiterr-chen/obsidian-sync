@@ -88,10 +88,30 @@ def _exclusive_create(path: str, content: str) -> bool:
     return True
 
 
+def _content_identity(directory: str, name: str, content: str) -> str:
+    """T07: stable identity for a candidate = target name + content hash.
+
+    Random suffixes made every export of the SAME content a new file; the
+    identity is deterministic so repeat deliveries are recognized and
+    published exactly once (manifest-tracked)."""
+    return "%s.%s" % (name, _sha256_text(content)[:16])
+
+
+def _candidate_for_identity(directory: str, identity: str) -> Optional[str]:
+    manifest = _load_manifest(directory)
+    entry = manifest.get("candidates", {}).get(identity)
+    return entry if entry and os.path.isfile(entry) else None
+
+
 def _unique_candidate(directory: str, name: str, content: str) -> str:
-    """R10: append-only candidate with exclusive creation and random
-    identity - two exports in the same second produce two files, and no
-    candidate is ever overwritten."""
+    """R10/T07: append-only candidate with DETERMINISTIC identity (name +
+    content hash): identical content re-delivered finds its existing file
+    (idempotent, no new copy); genuinely new content gets a fresh file
+    stamped with the publish time. No candidate is ever overwritten."""
+    identity = _content_identity(directory, name, content)
+    existing = _candidate_for_identity(directory, identity)
+    if existing is not None:
+        return existing  # same content already published exactly once
     base = os.path.splitext(name)[0]
     stamp = utc_now().replace(":", "").replace("-", "")[:15]
     while True:
@@ -99,6 +119,9 @@ def _unique_candidate(directory: str, name: str, content: str) -> str:
             directory, "%s.candidate-%s-%s.md"
             % (base, stamp, secrets.token_hex(4)))
         if _exclusive_create(candidate, content):
+            manifest = _load_manifest(directory)
+            manifest.setdefault("candidates", {})[identity] = candidate
+            _save_manifest(directory, manifest)
             return candidate
 
 
@@ -133,6 +156,13 @@ def write_candidate(directory: str, name: str, content: str,
                 with open(target, "r", encoding="utf-8") as handle:
                     if _sha256_text(handle.read()) == new_hash:
                         return {"outcome": "unchanged", "path": target}
+            identity = _content_identity(directory, name, content)
+            already = _candidate_for_identity(directory, identity)
+            if already is not None:
+                # T07: this exact content was already delivered beside the
+                # main file - publish once, never duplicate
+                return {"outcome": "unchanged", "path": target,
+                        "candidate_path": already}
             candidate = _unique_candidate(directory, name, content)
             return {"outcome": "preserved_with_candidate", "path": target,
                     "candidate_path": candidate}

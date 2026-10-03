@@ -203,14 +203,38 @@ class BudgetLedger:
         row = self._reservation(reservation_id)
         if row is None:
             return
-        with self.kb._tx() as conn:
-            conn.execute(
-                "UPDATE budget_reservations SET status='unknown', settled_at="
-                "strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?",
-                (reservation_id,))
-        self.kb.record_usage(
-            "unknown-provider", "unknown-model", row["kind"], row["est_input"],
-            0, "unknown:estimate-charged", run_id=run_id)
+        # T02: status flip AND the usage row commit in ONE transaction; the
+        # usage row carries reservation_id so replays are idempotent (a
+        # retry of fail_unknown never double-charges). Dispatched requests
+        # may still have been billed provider-side; zero would under-count.
+        conn = self.kb._conn
+        with self.kb._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                current = conn.execute(
+                    "SELECT kind, est_input, status FROM"
+                    " budget_reservations WHERE id=?",
+                    (reservation_id,)).fetchone()
+                if current is None or current["status"] in ("settled", "unknown"):
+                    conn.execute("COMMIT")  # idempotent replay
+                    return
+                conn.execute(
+                    "INSERT INTO usage_events (provider, model, kind,"
+                    " input_tokens, output_tokens, cost_basis, run_id,"
+                    " reservation_id, created_at)"
+                    " VALUES ('unknown-provider','unknown-model',?,?,0,"
+                    "'estimate:not-provider-measured',?,?,"
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    (current["kind"], current["est_input"], run_id,
+                     reservation_id))
+                conn.execute(
+                    "UPDATE budget_reservations SET status='unknown',"
+                    " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+                    " WHERE id=?", (reservation_id,))
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
 
     def release(self, reservation_id: int) -> None:
         """Reservation made but no bytes were dispatched (pre-flight checks)."""

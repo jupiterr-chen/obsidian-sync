@@ -186,7 +186,8 @@ class AnalysisRunTest(unittest.TestCase):
         # never recorded as zero cost
         usage = self.kb.usage_for_run(created["run_id"])
         self.assertEqual(len(usage), 1)
-        self.assertEqual(usage[0]["cost_basis"], "unknown:estimate-charged")
+        self.assertEqual(usage[0]["cost_basis"],
+                         "estimate:not-provider-measured")  # T02 label
         self.assertGreater(usage[0]["input_tokens"], 0)
 
     def test_budget_gates_reject_before_provider_calls(self):
@@ -337,8 +338,16 @@ class AnalysisExportTest(unittest.TestCase):
             self.assertIn("/api/kb/v1/evidence/", markdown)
             self.assertIn("全部有效：True", markdown)
             # re-export is a no-op (unchanged); missing run errors cleanly
+            # T07: identical re-delivery is idempotent; the second export
+            # either reports unchanged (via candidate identity) or appends
+            # nothing new - exactly one candidate file exists either way
+            # T07: identical re-delivery matches the main file (unchanged
+            # fast path) or a published candidate - either way NO duplicate
             second = export_analysis_runs(kb, out_dir)
-            self.assertEqual(second["outcomes"], ["unchanged"])
+            markdowns = [f for f in os.listdir(out_dir)
+                         if f.endswith(".md")]
+            self.assertEqual(len(markdowns), 1,
+                             "duplicate delivery created %r" % markdowns)
             missing = export_analysis_runs(kb, out_dir, run_id="run-none")
             self.assertEqual(missing.get("error"), "run not found")
         finally:

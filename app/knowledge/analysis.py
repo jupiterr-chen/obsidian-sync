@@ -55,10 +55,28 @@ def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
     try:
         _validate_vectors(embedder, texts, vectors)
     except ValueError:
-        ledger.release(reservation)
+        # T02: the provider already billed this call (usage returned); a
+        # bad SHAPE is a post-payment failure - settle the real usage, do
+        # NOT release the reservation. The cache simply isn't written.
+        ledger.settle(reservation, usage)
         raise
     ledger.settle(reservation, usage)
     return vectors, usage
+
+
+def embedding_cache_key(embedder) -> str:
+    """T06: cache identity = provider semantic name + model + dims.
+
+    Two providers exposing the SAME model name at the SAME dimensions but
+    different vector spaces must never share cache rows; the provider's
+    stable semantic identity (name, optionally base_url host) keys the
+    row alongside the model/revision and dimensions."""
+    provider = getattr(embedder, "name", "") or ""
+    model = getattr(embedder, "model", "") or ""
+    dims = getattr(embedder, "dimensions", 0) or 0
+    base = getattr(embedder, "base_url", "") or ""
+    host = base.split("//")[-1].split("/")[0] if base else ""
+    return "%s/%s/d%d%s" % (provider, model, dims, "@" + host if host else "")
 
 
 def _validate_vectors(embedder, texts, vectors) -> None:
@@ -83,14 +101,15 @@ def ensure_block_embeddings(kb: KnowledgeStore, embedder: EmbeddingProvider,
                             ledger: Optional[BudgetLedger] = None) -> int:
     """Embed missing blocks (cache keyed by model). Returns newly embedded."""
     dims = getattr(embedder, "dimensions", 0) or None
+    cache_key = embedding_cache_key(embedder)
     missing = [bid for bid in block_ids
-               if kb.get_embedding(embedder.model, bid, dimensions=dims) is None]
+               if kb.get_embedding(cache_key, bid, dimensions=dims) is None]
     if not missing:
         return 0
     blocks = kb.blocks_by_ids(missing)
     vectors, usage = budgeted_embed(embedder, [b["text"] for b in blocks],
                                     ledger=ledger, kb=kb)
-    kb.put_embeddings(embedder.model,
+    kb.put_embeddings(cache_key,
                       {b["block_id"]: v for b, v in zip(blocks, vectors)})
     return len(blocks)
 
@@ -120,20 +139,23 @@ def hybrid_search(kb: KnowledgeStore, query: str,
     allowed_set = set(allowed)
     keyword_rank = [hit.block["block_id"] for hit in kw["hits"]
                     if hit.block["block_id"] in allowed_set]
-    # S10: the VECTOR leg recalls independently from the full allowed set -
-    # not only from keyword hits - so a semantically strong block with zero
-    # lexical overlap still enters fusion
-    vector_pool = allowed[:embed_top]
-    ensure_block_embeddings(kb, embedder, vector_pool, ledger=ledger)
+    # S10/T06: the VECTOR leg recalls independently over the ENTIRE allowed
+    # set (embed_top only caps how many top-ranked candidates flow into
+    # fusion, never which blocks are scoreable), so a semantically strong
+    # block at any position - including beyond the first N rows - is
+    # reachable.
+    ensure_block_embeddings(kb, embedder, allowed, ledger=ledger)
     vectors, _q_usage = budgeted_embed(embedder, [query], ledger=ledger, kb=kb)
     query_vec = vectors[0]
+    cache_key = embedding_cache_key(embedder)
     dims = getattr(embedder, "dimensions", 0) or None
     scored = []
-    for block_id in vector_pool:
-        vector = kb.get_embedding(embedder.model, block_id, dimensions=dims)
+    for block_id in allowed:
+        vector = kb.get_embedding(cache_key, block_id, dimensions=dims)
         if vector:
             scored.append((block_id, _cosine(query_vec, vector)))
-    vector_rank = [bid for bid, _ in sorted(scored, key=lambda t: -t[1])]
+    vector_rank = [bid for bid, _ in
+                   sorted(scored, key=lambda t: -t[1])][:embed_top]
 
     fused: Dict[str, float] = {}
     for rank, bid in enumerate(keyword_rank):
