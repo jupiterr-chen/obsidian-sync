@@ -30,6 +30,13 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-03（深夜）第三轮修复 + G1 通过 + 影子验收进行中
+
+- 第三轮复核（T01-T07）→ 全部修复（提交 c99f159 → 552a67b）；**G1 通过**：探针 14/14、301 tests。
+- N5 影子小批**已在服务器隔离目录运行**（shadow/state，独立库+快照；快照 61 done 0 failed；提取进行中，OCR 密集约 27s/页）。完成后按 tools/shadow-acceptance/SHADOW-RUNBOOK.md：对账→幂等重跑→人工标注→measure。
+- N6 全量 dry-run（只读）完成：新 recipe 需重提取 524 份（14,751 页 / OCR 2,792 页），旧产物全保留；**未启动全量**（待授权）。
+- 全量/生产切换前置：影子人工标注（A04/A06/A08/A09 金标准）+ 用户明确授权。
+
 ## 2026-10-03（晚）第二轮评审修复完成（S01-S10 全部 fixed，待复验）
 
 - 二轮复核（RE-REVIEW-20261003，基线 4949dcd，NEEDS_CHANGES，S01-S10）→ 全部修复。RED/GREEN 矩阵与隔离启动验收见 `second-remediation-log.md`；提交 01c02d7 → a7640fd → e369d32。

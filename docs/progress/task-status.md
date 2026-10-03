@@ -73,6 +73,20 @@
 
 最终回归 287 OK。逐项 RED/GREEN、隔离启动验收记录见 `second-remediation-log.md`。真实 NOT_RUN/BLOCKED 项不变。
 
+## 第三轮评审修复 + 发布准备（2026-10-03，THIRD-REVIEW S/T01-T07）
+
+|问题|状态|修复提交|回归载体|
+|---|---|---|---|
+|T01 旧库升级|fixed|c99f159|test_third_review.T01（旧 schema fixture）|
+|T02 预算状态机|fixed|c99f159/4109655|T02BudgetStateMachineTest|
+|T03 版本公开时间|fixed|c99f159/4109655|T03VersionPublicTimeTest|
+|T04 元数据纪元|fixed|c99f159|T04MetadataEpochTest|
+|T05 漏页/recipe|fixed|c99f159|T05MixedPdfAndRecipeTest|
+|T06 召回/缓存|fixed|c99f159|T06FullRecallAndCacheTest|
+|T07 幂等候选|fixed|c99f159|T07IdempotentCandidatesTest|
+
+**G1 通过**：探针 14/14 + 301 tests。N5 影子小批进行中（服务器隔离目录）；N6 全量 dry-run 完成（524 重提取/14,751 页/OCR 2,792 页；旧产物全保留）。详见 `release-readiness-log.md`。
+
 ## 记录
 
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。
