@@ -77,21 +77,31 @@ class BudgetLedger:
         self.budget = budget or Budget()
 
     # ------------------------------------------------------------- totals
+    # S01: totals count settled usage, outstanding reservations AND pages
+    # implied by vision usage/reservations (pending pages are spent budget).
+    _TOTALS_SQL = """
+        SELECT
+          (SELECT COALESCE(SUM(input_tokens),0) FROM usage_events) AS used_i,
+          (SELECT COUNT(*) FROM usage_events) AS calls,
+          (SELECT COALESCE(SUM(est_input),0) FROM budget_reservations
+             WHERE status IN ('reserved')) AS res_e,
+          (SELECT COUNT(*) FROM budget_reservations
+             WHERE status IN ('reserved')) AS res_r,
+          (SELECT COUNT(*) FROM usage_events WHERE kind='vision') AS used_p,
+          (SELECT COUNT(*) FROM budget_reservations
+             WHERE status IN ('reserved','unknown')
+               AND kind='vision-page') AS res_p
+    """
+
+    def _totals_conn(self, conn) -> Dict[str, int]:
+        row = conn.execute(self._TOTALS_SQL).fetchone()
+        return {"input": row["used_i"] + row["res_e"],
+                "requests": row["calls"] + row["res_r"],
+                "pages": row["used_p"] + row["res_p"]}
+
     def _totals(self) -> Dict[str, int]:
         with self.kb._lock:
-            usage = self.kb._conn.execute(
-                "SELECT COALESCE(SUM(input_tokens),0) i,"
-                " COUNT(*) calls FROM usage_events").fetchone()
-            reserved = self.kb._conn.execute(
-                "SELECT COALESCE(SUM(est_input),0) e, COUNT(*) r"
-                " FROM budget_reservations WHERE status IN ('reserved')"
-            ).fetchone()
-            pages = self.kb._conn.execute(
-                "SELECT COUNT(*) p FROM usage_events WHERE kind='vision'"
-            ).fetchone()
-        return {"input": usage["i"] + reserved["e"],
-                "requests": usage["calls"] + reserved["r"],
-                "pages": pages["p"]}
+            return self._totals_conn(self.kb._conn)
 
     def remaining(self) -> Optional[int]:
         if self.budget.max_total_input_tokens is None:
@@ -102,40 +112,87 @@ class BudgetLedger:
     def reserve(self, kind: str, est_input: int, run_id: Optional[str] = None,
                 counts_as_page: bool = False) -> int:
         est_input = max(1, int(est_input))
-        totals = self._totals()
         budget = self.budget
-        if (budget.max_total_input_tokens is not None
-                and totals["input"] + est_input > budget.max_total_input_tokens):
-            raise BudgetExceeded(
-                "budget_exceeded_total_input_tokens: used+reserved=%d, "
-                "request=%d, cap=%d" % (totals["input"], est_input,
-                                        budget.max_total_input_tokens))
-        if (budget.max_requests_total is not None
-                and totals["requests"] + 1 > budget.max_requests_total):
-            raise BudgetExceeded("budget_exceeded_max_requests")
-        if counts_as_page and budget.max_pages_total is not None \
-                and totals["pages"] + 1 > budget.max_pages_total:
-            raise BudgetExceeded("budget_exceeded_max_pages")
-        with self.kb._tx() as conn:
-            cur = conn.execute(
-                "INSERT INTO budget_reservations (kind, est_input, status,"
-                " run_id, created_at) VALUES (?,?,?,?,"
-                "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
-                (kind, est_input, "reserved", run_id))
-            return cur.lastrowid
+        # S01: check and insert share ONE BEGIN IMMEDIATE write transaction,
+        # so two independent connections cannot both pass the cap check and
+        # jointly overspend (the re-review's 6+6 vs cap-10 case).
+        conn = self.kb._conn
+        with self.kb._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                totals = self._totals_conn(conn)
+                if (budget.max_total_input_tokens is not None
+                        and totals["input"] + est_input
+                        > budget.max_total_input_tokens):
+                    raise BudgetExceeded(
+                        "budget_exceeded_total_input_tokens:"
+                        " used+reserved=%d, request=%d, cap=%d"
+                        % (totals["input"], est_input,
+                           budget.max_total_input_tokens))
+                if (budget.max_requests_total is not None
+                        and totals["requests"] + 1 > budget.max_requests_total):
+                    raise BudgetExceeded("budget_exceeded_max_requests")
+                if counts_as_page and budget.max_pages_total is not None \
+                        and totals["pages"] + 1 > budget.max_pages_total:
+                    raise BudgetExceeded("budget_exceeded_max_pages")
+                cur = conn.execute(
+                    "INSERT INTO budget_reservations (kind, est_input,"
+                    " status, run_id, created_at) VALUES (?,?,?,?,"
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    ("vision-page" if counts_as_page else kind, est_input,
+                     "reserved", run_id))
+                reservation_id = cur.lastrowid
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+        return reservation_id
 
     def settle(self, reservation_id: int, usage: Usage,
                run_id: Optional[str] = None) -> None:
-        with self.kb._tx() as conn:
-            conn.execute(
-                "UPDATE budget_reservations SET status='settled', settled_at="
-                "strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE id=?",
-                (reservation_id,))
-        self.kb.record_usage(
-            usage.provider, usage.model, usage_kind_for_reservation(
-                self._kind_of(reservation_id)),
-            usage.input_tokens, usage.output_tokens, usage.cost_basis,
-            run_id=run_id)
+        """Settle reservation + record usage in ONE transaction.
+
+        S01: a missing/zero provider usage is topped up with the
+        reservation's estimate (a successful call is never free); settling
+        twice is idempotent (unique usage row per reservation)."""
+        conn = self.kb._conn
+        with self.kb._lock:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT kind, est_input, status FROM"
+                    " budget_reservations WHERE id=?",
+                    (reservation_id,)).fetchone()
+                if row is None:
+                    raise ValueError("unknown reservation %r" % reservation_id)
+                if row["status"] == "settled":
+                    conn.execute("COMMIT")  # idempotent replay
+                    return
+                input_tokens = usage.input_tokens or row["est_input"]
+                conn.execute(
+                    "INSERT INTO usage_events (provider, model, kind,"
+                    " input_tokens, output_tokens, cost_basis, run_id,"
+                    " reservation_id, created_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,"
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    (usage.provider, usage.model,
+                     usage_kind_for_reservation(row["kind"]),
+                     input_tokens, usage.output_tokens, usage.cost_basis,
+                     run_id, reservation_id))
+                conn.execute(
+                    "UPDATE budget_reservations SET status='settled',"
+                    " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"
+                    " WHERE id=?", (reservation_id,))
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+
+    def settle_crash_before_usage(self, reservation_id: int, usage: Usage,
+                                  run_id: Optional[str] = None) -> None:
+        """Test hook: crash between the provider answer and any durable
+        settlement write (the re-review's interrupted-settle window)."""
+        raise RuntimeError("simulated crash before settlement writes")
 
     def fail_unknown(self, reservation_id: int,
                      run_id: Optional[str] = None) -> None:

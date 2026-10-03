@@ -197,9 +197,12 @@ CREATE TABLE IF NOT EXISTS usage_events (
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cost_basis TEXT NOT NULL DEFAULT 'unknown',
     run_id TEXT,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    reservation_id INTEGER UNIQUE     -- S01: idempotent settlement link
 );
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_reservation
+    ON usage_events(reservation_id) WHERE reservation_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS budget_reservations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     kind TEXT NOT NULL,
@@ -319,6 +322,9 @@ class KnowledgeStore:
         migrations = (
             ("snapshots", "state", "TEXT NOT NULL DEFAULT 'verified'"),
             ("kb_versions", "first_observed_at", "TEXT"),
+            ("kb_versions", "public_available_at", "TEXT"),
+            ("kb_versions", "public_time_basis", "TEXT"),
+            ("usage_events", "reservation_id", "INTEGER"),
         )
         for table, column, decl in migrations:
             columns = {row[1] for row in self._conn.execute(
@@ -413,6 +419,11 @@ class KnowledgeStore:
                         or synced_at,
                     ),
                 )
+            # S07: outbox enqueue lives in the SAME transaction as the
+            # version insert - a crash between them can no longer lose the
+            # impact task (both roll back together and re-sync retries both)
+            if new_rows:
+                self._enqueue_impact_conn(conn, new_rows)
         return {"versions": len(rows), "new_versions": new_versions,
                 "new_version_rows": new_rows}
 
@@ -1028,6 +1039,16 @@ class KnowledgeStore:
         return item
 
     # ------------------------------------------------------ impact outbox
+    def _enqueue_impact_conn(self, conn, rows: List[Dict[str, Any]]) -> int:
+        """Insert pending impact rows on an OPEN transaction (S07)."""
+        now = utc_now()
+        for row in rows:
+            conn.execute(
+                "INSERT INTO impact_outbox (source, doc_id, version_id,"
+                " status, created_at) VALUES (?,?,?,'pending',?)",
+                (row["source"], row["doc_id"], row["version_id"], now))
+        return len(rows)
+
     def enqueue_impact(self, rows: List[Dict[str, Any]]) -> int:
         """R15: durable pending impact-analysis tasks, written in the same
         reconciliation pass that registers the new versions."""
