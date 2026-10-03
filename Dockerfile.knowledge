@@ -1,10 +1,12 @@
-# Knowledge-layer image: library code + pinned PDF/OCR runtime (R13).
+# Knowledge-layer image: library code + pinned PDF/OCR runtime (R13/S09).
 # Built by deploy/docker-compose.full.yml and docker-compose.knowledge.yml;
 # the plain Dockerfile remains the stdlib-only first-layer image.
 FROM python:3.11-slim
 
 # OpenCV runtime libraries (headless still needs libxcb/glib on slim)
-RUN apt-get update && apt-get install -y --no-install-recommends     libglib2.0-0 libgl1 libxcb1 libsm6 libxext6 libxrender1     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libgl1 libxcb1 libsm6 libxext6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 ENV PYTHONPATH=/app \
@@ -12,10 +14,12 @@ ENV PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1
 
 COPY requirements-knowledge.txt /app/requirements-knowledge.txt
-RUN pip install --no-cache-dir -r /app/requirements-knowledge.txt && \
-    python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR()" || true
-    # the warm-up pre-bundles the default PP-OCR models into the image so
-    # containers never download models at runtime (offline reproducibility)
+# S09: a failed dependency install or OCR warm-up FAILS the build - the old
+# `|| true` shipped images without the capabilities they claim. The warm-up
+# pre-bundles the default PP-OCR models so containers never download models
+# at runtime (offline reproducibility).
+RUN pip install --no-cache-dir -r /app/requirements-knowledge.txt \
+    && python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR()"
 
 COPY app/ /app/
 

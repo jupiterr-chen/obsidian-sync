@@ -27,6 +27,9 @@ services:
   library:
     <<: *library-base
     container_name: obsidian-sync-library
+    # S09: explicit first-layer serve command - the shared image's default
+    # CMD is the knowledge worker, which must never run as "library"
+    command: ["python", "-m", "library", "serve", "--config", "/app/config/config.json"]
     environment:
       RESEARCHKB_CONFIG: /app/config/config.json
     volumes:

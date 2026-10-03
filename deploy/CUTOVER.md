@@ -22,6 +22,7 @@ cd $NEW/repo/deploy
 docker compose -f docker-compose.full.yml config >/dev/null && echo "compose config OK"
 
 # 1) 冻结所有写者（R13：包括独立回填 worker，保证一致的切换点）
+#    注意：此后所有步骤都显式 cd，不再依赖上一步的工作目录
 pkill -f "knowledge run-extracts" || true          # 后台 OCR 回填
 pkill -f "knowledge worker" || true                # 周期 worker（如已部署）
 cd $OLD/repo && docker compose stop                # 旧栈（保留容器与数据）
@@ -40,12 +41,16 @@ PY
 cp -a $OLD/vault/. $NEW/vault/            # 含人工区与自动研究候选/
 cp -a $OLD/state/syncthing $NEW/state/
 
-# 4) 容器路径版配置：config/config.json 的 root 用 /archive、/discord，
+# 4) 容器路径版配置（deploy/config/ 下）：
+#    config/config.json 的 root 用 /archive、/discord，
 #    catalog_db=/data/catalog/catalog.sqlite3（与旧栈相同挂载布局）；
-#    knowledge.json 的 catalog_db=/catalog/catalog.sqlite3（只读挂载），
-#    writeback.analysis_dir=$NEW/vault/自动研究候选。
+#    knowledge.json 的 catalog_db=/catalog/catalog.sqlite3（只读挂载）。
+#    S09: writeback.analysis_dir 必须是容器视角路径 /vault/自动研究候选
+#    （worker 容器把 $NEW/vault 挂载为 /vault），不是宿主 $NEW/vault/...；
+#    快照根同理写 /state/snapshots。
 
-# 5) 起新栈并自检
+# 5) 起新栈并自检（显式使用绝对路径，任何 cwd 下都可执行）
+cd $NEW/repo/deploy
 docker compose -f docker-compose.full.yml up -d --build
 curl -sS http://192.168.1.150:8765/healthz | python3 -m json.tool
 curl -sS http://127.0.0.1:8766/api/kb/v1/health | python3 -m json.tool
