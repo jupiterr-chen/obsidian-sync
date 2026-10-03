@@ -1,6 +1,7 @@
 # 评审指南（给独立评审者 / Codex）
 
-> 最新独立复核：基线534014a整体NEEDS_CHANGES，见[2026-10-02评审报告](INDEPENDENT-REVIEW-20261002.md)及[修复任务书](../15-review-remediation-taskbook.md)。以下保留原提交者说明。
+> **首轮独立复核（基线 534014a）：整体 NEEDS_CHANGES**，见[2026-10-02 评审报告](INDEPENDENT-REVIEW-20261002.md)及[修复任务书](../15-review-remediation-taskbook.md)。
+> **R01-R15 已全部修复（2026-10-03）**：逐项 RED/GREEN 证据与提交见 [remediation-log.md](remediation-log.md)；回归载体为 `app/tests/test_review_*`。复验请以修复后基线（≥ `3cd2913`）重跑评审反例，并注意：未重做 M0、未降低任何验收标准、真实 NOT_RUN/BLOCKED 项保持原状。以下保留原提交者说明。
 
 更新：2026-10-03。本文件是外部评审的入口：先读什么、每个声明去哪里核、哪些没做、重点审哪里。
 
