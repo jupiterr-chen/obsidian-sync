@@ -147,32 +147,39 @@ class S02WritebackAppendOnlyTest(unittest.TestCase):
         register_write_root(self.dir)
 
     def test_post_check_edit_never_loses_human_content(self):
-        """Deterministic race: a human write is injected AFTER the final
-        hash check but BEFORE the replace. The human text must survive."""
+        """Deterministic race: a human write lands on the main file DURING
+        the second export, inside the last window the service is active on
+        that path. The human text must survive - the export may only
+        produce an append-only candidate, never rewrite the main file."""
         from knowledge import writeback as wb
 
         target = os.path.join(self.dir, "clm-race.md")
         wb.write_candidate(self.dir, "clm-race.md", "machine-v1")
-        original_replace = os.replace
         gate = threading.Event()
 
-        def racing_replace(src, dst, *args, **kwargs):
-            # the external editor writes between check and replace
-            if dst == target and not gate.is_set():
-                gate.set()
-                with open(dst, "w", encoding="utf-8") as handle:
-                    handle.write("HUMAN CONTENT WRITTEN IN THE WINDOW")
-            return original_replace(src, dst, *args, **kwargs)
+        original_unique = wb._unique_candidate
 
-        wb.os.replace = racing_replace
+        def racing_candidate(directory, name, content):
+            # external editor writes the main file while the export is
+            # deciding what to publish
+            if not gate.is_set():
+                gate.set()
+                with open(target, "w", encoding="utf-8") as handle:
+                    handle.write("HUMAN CONTENT WRITTEN IN THE WINDOW")
+            return original_unique(directory, name, content)
+
+        wb._unique_candidate = racing_candidate
         try:
             result = wb.write_candidate(self.dir, "clm-race.md", "machine-v2")
         finally:
-            wb.os.replace = original_replace
+            wb._unique_candidate = original_unique
+        self.assertEqual(result["outcome"], "preserved_with_candidate")
         with open(target, "r", encoding="utf-8") as handle:
             final = handle.read()
         self.assertIn("HUMAN CONTENT WRITTEN IN THE WINDOW", final,
-                      "post-check overwrite destroyed human content (%r)" % result)
+                      "export overwrote a human edit (%r)" % result)
+        with open(result["candidate_path"], "r", encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "machine-v2")
 
     def test_machine_outputs_are_immutable_appends(self):
         """Generated outputs go to unique append-only names; a 'latest'
@@ -713,21 +720,47 @@ class S10IndependentRecallTest(unittest.TestCase):
 
     def test_embedding_cache_isolated_by_provider_and_dimensions(self):
         from knowledge.providers import MockEmbedder
-        from knowledge.store import KnowledgeStore
 
         kb = _kb()
         try:
+            stamp = "2026-10-01T00:00:00Z"
+            kb.upsert_documents([{
+                "source": "reports", "doc_id": "D1", "title": "D1",
+                "available": True, "first_seen_at": stamp,
+                "last_seen_at": stamp,
+            }], stamp)
+            kb.upsert_versions([{
+                "source": "reports", "doc_id": "D1", "version_id": "v1",
+                "sha256": "a" * 64, "bytes": 10,
+                "media_type": "application/pdf", "ext": "pdf",
+                "rel_path": "x", "is_current": True, "state": "ready",
+                "content_changed_at": None,
+            }], stamp)
+            kb.record_extraction({
+                "extraction_id": "extr-d1", "source": "reports",
+                "doc_id": "D1", "version_id": "v1",
+                "snapshot_sha256": "a" * 64, "parser_id": "t",
+                "parser_version": "1", "config_digest": "c",
+                "status": "ready", "issues": [], "stats": {},
+            }, [{
+                "block_type": "paragraph", "text": "cache isolation text",
+                "locator": {"kind": "pdf", "page": 1},
+                "quality": {"status": "ready", "issues": []},
+            }])
+            block_id = "extr-d1-b0000"
             from knowledge.analysis import ensure_block_embeddings
+
             embedder_a = MockEmbedder(dimensions=8)
             embedder_a.model = "shared-name"
             embedder_b = MockEmbedder(dimensions=16)
-            embedder_b.model = "shared-name"  # same model name, other dims
-            ensure_block_embeddings(kb, embedder_a, ["block-1"])
-            vector = kb.get_embedding("shared-name", "block-1")
+            embedder_b.model = "shared-name"  # same name, other dims
+            ensure_block_embeddings(kb, embedder_a, [block_id])
+            vector = kb.get_embedding("shared-name", block_id)
+            self.assertIsNotNone(vector)
             self.assertEqual(len(vector), 8)
             # the 16-dim provider must NOT reuse the 8-dim cache entry
-            ensure_block_embeddings(kb, embedder_b, ["block-1"])
-            vector_b = kb.get_embedding_for("shared-name", 16, "block-1")
+            ensure_block_embeddings(kb, embedder_b, [block_id])
+            vector_b = kb.get_embedding_for("shared-name", 16, block_id)
             self.assertIsNotNone(vector_b)
             self.assertEqual(len(vector_b), 16)
         finally:

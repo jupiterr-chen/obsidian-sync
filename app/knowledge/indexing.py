@@ -110,6 +110,10 @@ def allowed_block_ids(kb: KnowledgeStore,
         version_where = (" AND v.first_observed_at IS NOT NULL"
                          " AND v.first_observed_at <= ?")
         params = list(params) + [filters.as_of]
+    if filters.as_of and filters.as_of_mode == "public":
+        version_where = (" AND v.public_available_at IS NOT NULL"
+                         " AND v.public_available_at <= ?")
+        params = list(params) + [filters.as_of]
     sql = ("SELECT b.block_id FROM blocks b"
            " JOIN extractions b_v ON b_v.extraction_id = b.extraction_id"
            + version_join +
@@ -221,13 +225,13 @@ def _document_filter_sql(filters: SearchFilters) -> Tuple[List[str], List[Any]]:
         params.append(filters.date_to)
     if filters.as_of:
         if filters.as_of_mode == "public":
-            # R08: a public-mode claim needs an actual public date basis;
-            # falling back to first_seen would fabricate publication times.
-            public_basis = ("COALESCE(d.report_date,"
-                            " substr(d.published_at,1,10), d.filing_date)")
-            where.append(public_basis + " IS NOT NULL AND " + public_basis
-                         + " <= ?")
-            params.append(filters.as_of[:10])
+            # S03: public visibility is claimed on PUBLICATION EVIDENCE
+            # (published_at / filing_date) - never on the report period,
+            # which would leak future information. The version-level basis
+            # is enforced per-candidate in search(); the document-level
+            # prefilter only removes docs with NO basis at all.
+            public_basis = ("COALESCE(d.published_at, d.filing_date)")
+            where.append(public_basis + " IS NOT NULL")
         # system mode is enforced per-version in search() (R08): the
         # document check alone cannot prove the CURRENT version was
         # observable at as_of.
@@ -311,6 +315,14 @@ def search(kb: KnowledgeStore, query: str, filters: Optional[SearchFilters] = No
                                      block["version_id"])
             first_observed = (version or {}).get("first_observed_at")
             if not first_observed or first_observed > filters.as_of:
+                continue
+        if filters.as_of and filters.as_of_mode == "public":
+            # S03: version-level publication evidence; unknown basis is
+            # never visible at a past public cutoff (no report-period leak)
+            version = kb.get_version(block["source"], block["doc_id"],
+                                     block["version_id"])
+            public_at = (version or {}).get("public_available_at")
+            if not public_at or public_at > filters.as_of:
                 continue
         hits.append(SearchHit(block=block, score=round(scores[block_id], 4),
                               matched_terms=sorted(set(matched.get(block_id, [])))))

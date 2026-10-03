@@ -134,12 +134,23 @@ class R08VersionSelectionTest(unittest.TestCase):
 
         kb = _kb()
         try:
-            # document with report_date: visible when the date has passed
-            self._seed(kb)
+            # S03: the report period is NOT publication evidence; give the
+            # document a published_at basis before expecting visibility
+            stamp = "2026-01-10T00:00:00Z"
+            kb.upsert_documents([dict(_doc_row(),
+                                      published_at="2026-07-01T00:00:00Z")],
+                                stamp)
+            kb.upsert_versions([_version_row("v1", True, "a" * 64)], stamp)
+            kb.record_extraction(*_extraction("extr-p", "v1",
+                                              "margin text", "a" * 64))
             build_generation(kb)
             visible = search(kb, "margin", SearchFilters(
-                as_of="2026-07-01T00:00:00Z", as_of_mode="public"))
+                as_of="2026-07-02T00:00:00Z", as_of_mode="public"))
             self.assertGreater(len(visible["hits"]), 0)
+            # before publication: invisible
+            pre = search(kb, "margin", SearchFilters(
+                as_of="2026-06-30T00:00:00Z", as_of_mode="public"))
+            self.assertEqual(pre["hits"], [])
             early = search(kb, "margin", SearchFilters(
                 as_of="2026-01-01T00:00:00Z", as_of_mode="public"))
             self.assertEqual(early["hits"], [])

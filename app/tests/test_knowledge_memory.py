@@ -139,10 +139,14 @@ class WriteBackTest(unittest.TestCase):
         self.assertEqual(first["outcome"], "written")
         second = write_candidate(self.dir, "clm-a.md", "# v1 content")
         self.assertEqual(second["outcome"], "unchanged")
-        # our own regeneration with new content is allowed (hash matches ours)
+        # S02: even our own regeneration never rewrites the main file -
+        # machine output is append-only; the new content lands in a
+        # uniquely named candidate beside it
         third = write_candidate(self.dir, "clm-a.md", "# v2 content")
-        self.assertEqual(third["outcome"], "written")
+        self.assertEqual(third["outcome"], "preserved_with_candidate")
         with open(os.path.join(self.dir, "clm-a.md"), "r", encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "# v1 content")
+        with open(third["candidate_path"], "r", encoding="utf-8") as fh:
             self.assertEqual(fh.read(), "# v2 content")
         # human edit: our next write must NOT overwrite, candidate saved instead
         with open(os.path.join(self.dir, "clm-a.md"), "a", encoding="utf-8") as fh:

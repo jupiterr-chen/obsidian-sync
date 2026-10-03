@@ -82,7 +82,9 @@ def ensure_block_embeddings(kb: KnowledgeStore, embedder: EmbeddingProvider,
                             block_ids: Sequence[str],
                             ledger: Optional[BudgetLedger] = None) -> int:
     """Embed missing blocks (cache keyed by model). Returns newly embedded."""
-    missing = [bid for bid in block_ids if kb.get_embedding(embedder.model, bid) is None]
+    dims = getattr(embedder, "dimensions", 0) or None
+    missing = [bid for bid in block_ids
+               if kb.get_embedding(embedder.model, bid, dimensions=dims) is None]
     if not missing:
         return 0
     blocks = kb.blocks_by_ids(missing)
@@ -116,19 +118,22 @@ def hybrid_search(kb: KnowledgeStore, query: str,
         return {"ok": True, "generation_id": kw["generation_id"],
                 "hits": [], "terms": kw.get("terms", [])}
     allowed_set = set(allowed)
-    keyword_ids = [hit.block["block_id"] for hit in kw["hits"]
-                   if hit.block["block_id"] in allowed_set]
-    pool_ids = keyword_ids or allowed[:embed_top]
-    ensure_block_embeddings(kb, embedder, pool_ids, ledger=ledger)
+    keyword_rank = [hit.block["block_id"] for hit in kw["hits"]
+                    if hit.block["block_id"] in allowed_set]
+    # S10: the VECTOR leg recalls independently from the full allowed set -
+    # not only from keyword hits - so a semantically strong block with zero
+    # lexical overlap still enters fusion
+    vector_pool = allowed[:embed_top]
+    ensure_block_embeddings(kb, embedder, vector_pool, ledger=ledger)
     vectors, _q_usage = budgeted_embed(embedder, [query], ledger=ledger, kb=kb)
     query_vec = vectors[0]
+    dims = getattr(embedder, "dimensions", 0) or None
     scored = []
-    for block_id in pool_ids:
-        vector = kb.get_embedding(embedder.model, block_id)
+    for block_id in vector_pool:
+        vector = kb.get_embedding(embedder.model, block_id, dimensions=dims)
         if vector:
             scored.append((block_id, _cosine(query_vec, vector)))
     vector_rank = [bid for bid, _ in sorted(scored, key=lambda t: -t[1])]
-    keyword_rank = [h.block["block_id"] for h in kw["hits"]]
 
     fused: Dict[str, float] = {}
     for rank, bid in enumerate(keyword_rank):

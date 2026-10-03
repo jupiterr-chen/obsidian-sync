@@ -88,9 +88,14 @@ def extract_config_digest(ocr_config=None,
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def extractor_info(fmt: str):
+def extractor_info(fmt: str, ocr_engine=None):
     """(parser_id, parser_version) that WOULD run for a format, without
-    executing anything - enables the R02 zero-cost identity pre-check."""
+    executing anything - enables the R02 zero-cost identity pre-check.
+
+    S06: for images the parser identity includes the EFFECTIVE OCR engine
+    name, so a cached product of the same engine is found BEFORE the
+    (potentially paid) OCR runs; the runner passes the engine it will use.
+    """
     try:
         import pypdfium2  # noqa: F401
 
@@ -98,13 +103,16 @@ def extractor_info(fmt: str):
             return "pypdfium2", (_dep_version("pypdfium2") or "unknown")
     except ImportError:
         pass
-    ids = {"pdf": ("stdlib-pdf-degraded", "1"),
-           "html": ("stdlib-html", "1"),
-           "txt": ("stdlib-txt", "1"),
-           "img": ("stdlib-image", "1")}
-    if fmt not in ids:
+    base = {"pdf": ("stdlib-pdf-degraded", "1"),
+            "html": ("stdlib-html", "1"),
+            "txt": ("stdlib-txt", "1"),
+            "img": ("stdlib-image", "1")}
+    if fmt not in base:
         raise ExtractorMissing("no extractor registered for format %r" % fmt)
-    return ids[fmt]
+    parser_id, version = base[fmt]
+    if fmt == "img" and ocr_engine is not None:
+        parser_id = "stdlib-image+%s" % getattr(ocr_engine, "name", "engine")
+    return parser_id, version
 
 
 def compute_extraction_id(source: str, doc_id: str, version_id: str,
@@ -688,16 +696,23 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
 
     blocks: List[Block] = []
     per_page_chars: List[int] = []
+    page_confidences: List[Optional[float]] = []
+    page_ocr_status: List[str] = []
     ocr_candidates = 0
     ocr_applied = 0
     unmet_ocr_pages = 0
     missing_content_pages = 0
+    low_confidence_pages = 0
+    min_confidence = getattr(ocr_config, "min_confidence", 0.6)
     max_ocr_pages = getattr(ocr_config, "max_pages_per_doc", 200)
     render_dpi = getattr(ocr_config, "render_dpi", 200)
     for page_index, page_text in enumerate(page_texts, start=1):
+        page_confidence = None
+        page_status = "text_layer"
         if page_text is None:
             issues.append("page_%d_missing_content" % page_index)
             missing_content_pages += 1
+            page_status = "missing_content"
             page_text = ""
         wants_ocr, ocr_reasons = route_page_to_ocr(len(page_text), page_text)
         if wants_ocr:
@@ -734,19 +749,38 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                     if ocr_text.strip():
                         page_text = (page_text + "\n" + ocr_text).strip()
                         ocr_applied += 1
+                        page_confidence = confidence
                         issues.append("page_%d_ocr_applied:%s:conf=%.2f"
                                       % (page_index, engine_label, confidence))
+                        page_status = "ocr_applied"
                 except OcrEngineError as exc:
                     issues.append("page_%d_ocr_failed:%s" % (page_index, exc))
+                    page_status = "ocr_failed"
                 except Exception as exc:  # renderer/engine errors never abort
                     issues.append("page_%d_ocr_failed:%s" % (
                         page_index, type(exc).__name__))
+                    page_status = "ocr_failed"
             elif ocr is None or ocr_applied >= max_ocr_pages:
                 unmet_ocr_pages += 1
+                page_status = "needs_ocr_unmet"
+        # S05: OCR confidence gates THIS page and its block - plenty of
+        # text on other pages is not evidence this page's numbers are right
+        if page_confidence is not None and page_confidence < min_confidence:
+            low_confidence_pages += 1
+            page_status = "ocr_low_confidence"
+            issues.append("page_%d_ocr_low_confidence:%.2f<%.2f"
+                          % (page_index, page_confidence, min_confidence))
+        page_confidences.append(page_confidence)
+        page_ocr_status.append(page_status)
+        page_quality = Quality(STATUS_READY)
+        if page_status in ("ocr_low_confidence", "ocr_failed",
+                           "needs_ocr_unmet", "missing_content"):
+            page_quality = Quality(STATUS_REVIEW, [page_status])
         if page_text.strip():
             blocks.append(Block(
                 block_type="paragraph", text=page_text,
                 locator={"kind": "pdf", "page": page_index},
+                quality=page_quality,
             ))
         per_page_chars.append(len(page_text))
 
@@ -758,6 +792,7 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
     # R05: unhandled OCR candidates / missing content / OCR failures must
     # degrade the document below ready - remaining text volume is not proof.
     page_problems = (unmet_ocr_pages > 0 or missing_content_pages > 0
+                     or low_confidence_pages > 0
                      or any("ocr_failed" in i for i in merged_issues))
     status = merge_statuses(quality.status,
                             STATUS_REVIEW if page_problems else STATUS_READY,
@@ -776,6 +811,9 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
             "ocr_applied_pages": ocr_applied,
             "unmet_ocr_pages": unmet_ocr_pages,
             "missing_content_pages": missing_content_pages,
+            "low_confidence_pages": low_confidence_pages,
+            "page_confidences": page_confidences,
+            "page_ocr_status": page_ocr_status,
             "ocr_engine": getattr(ocr, "name", None) if ocr else None,
             "pdf_engine": engine_kind,
         },

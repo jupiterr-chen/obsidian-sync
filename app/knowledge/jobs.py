@@ -199,10 +199,18 @@ class JobRunner:
         # when this exact (config, parser) product already exists. A PDF that
         # pdfium cannot parse degrades to the stdlib parser, so both possible
         # identities are checked before doing any work.
-        parser_id, parser_version = extractor_info(fmt)
+        # S06: for images the identity must reflect the OCR engine that is
+        # about to run, otherwise the precheck misses and every rerun pays
+        # the OCR again
+        ocr_engine = self.ocr_engine() if fmt == "img" else None
+        parser_id, parser_version = extractor_info(fmt, ocr_engine=ocr_engine)
         candidate_ids = {compute_extraction_id(
             job["source"], job["doc_id"], job["version_id"], snap["sha256"],
             parser_id, parser_version, self.extract_digest)}
+        if fmt == "img" and ocr_engine is None:
+            candidate_ids.add(compute_extraction_id(
+                job["source"], job["doc_id"], job["version_id"],
+                snap["sha256"], "stdlib-image", "1", self.extract_digest))
         if fmt == "pdf" and parser_id == "pypdfium2":
             candidate_ids.add(compute_extraction_id(
                 job["source"], job["doc_id"], job["version_id"],

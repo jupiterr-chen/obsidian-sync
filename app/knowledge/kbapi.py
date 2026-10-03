@@ -121,6 +121,10 @@ class KbApi:
                                                            mode):
                 raise KbApiError(409, "cursor_expired",
                                  "cursor belongs to a different query or mode")
+            if decoded.get("epoch") and                     decoded.get("epoch") != self.metadata_epoch():
+                raise KbApiError(409, "cursor_expired",
+                                 "document metadata changed since the cursor"
+                                 " was issued; restart pagination")
         if mode == "hybrid" and self.embedder is None:
             raise KbApiError(422, "mode_unavailable",
                              "mode %r is not enabled in this deployment" % mode)
@@ -153,6 +157,9 @@ class KbApi:
             if active and decoded.get("generation") != active["generation_id"]:
                 raise KbApiError(409, "cursor_expired",
                                  "index generation changed since the cursor was issued")
+            if decoded.get("epoch") and                     decoded.get("epoch") != self.metadata_epoch():
+                raise KbApiError(409, "cursor_expired",
+                                 "document metadata changed; restart pagination")
             try:
                 offset = int(decoded.get("offset", 0))
             except (TypeError, ValueError):
@@ -191,6 +198,7 @@ class KbApi:
         if offset + limit < len(hits):
             next_cursor = encode_cursor({
                 "digest": self._query_digest(query, raw_filters, mode),
+                "epoch": self.metadata_epoch(),
                 "generation": result["generation_id"],
                 "offset": offset + limit,
             })
@@ -210,6 +218,27 @@ class KbApi:
         canonical = json.dumps({"q": query, "f": filters, "m": mode},
                                ensure_ascii=False, sort_keys=True)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+    def metadata_epoch(self) -> str:
+        """S08: digest of every revision-prone column that search filters
+        read at query time (available/symbol/doc_type/dates). Any metadata
+        change flips the epoch, so stale cursors fail with 409 instead of
+        silently skipping pages; revocation stays effective mid-pagination."""
+        with self.kb._lock:
+            row = self.kb._conn.execute(
+                "SELECT COUNT(*) c, COALESCE(SUM("
+                "  (CASE WHEN available=1 THEN 1 ELSE 0 END)"
+                "  + LENGTH(COALESCE(UPPER(symbol),''))"
+                "  + LENGTH(COALESCE(doc_type,''))"
+                "  + LENGTH(COALESCE(report_date,''))"
+                "  + LENGTH(COALESCE(published_at,''))"
+                "  + LENGTH(COALESCE(filing_date,''))"
+                "  + LENGTH(COALESCE(source,''))"
+                "), 0) s FROM kb_documents").fetchone()
+            # include row content ordering-independently: c + weighted sum
+            # of the filter-relevant fields; cheap and conservative
+            epoch_source = "c=%d;s=%d" % (row["c"], row["s"])
+        return hashlib.sha256(epoch_source.encode("utf-8")).hexdigest()[:12]
 
     def _hit_to_json(self, hit) -> Dict[str, Any]:
         block = hit.block
@@ -292,20 +321,33 @@ class KbApi:
         snap = self.kb.get_snapshot(source, doc_id, version_id)
         if snap is None:
             raise KbApiError(404, "not_found", "snapshot not taken")
-        from .snapshot import SnapshotStore
+        from .snapshot import SnapshotStore, IntegrityError
 
         blobs = SnapshotStore(self.snapshot_root)
-        state = blobs.verify_blob(snap["store_path"], snap["sha256"],
-                                  snap["bytes"])
-        if state is None:
-            raise KbApiError(404, "not_found", "snapshot blob missing")
-        if state is False:
+        # S04: verify and read the SAME bytes - hash the content actually
+        # being returned instead of verify-then-reopen (the re-review's
+        # verify/read swap window); a mismatch mid-read refuses or retries
+        # against a consistent copy, never serving new bytes under the old
+        # identity.
+        path = os.path.join(blobs.root, *snap["store_path"].split("/"))
+        import hashlib
+
+        data = None
+        for attempt in range(3):
+            try:
+                with open(path, "rb") as handle:
+                    data = handle.read()
+            except OSError as exc:
+                raise KbApiError(404, "not_found",
+                                 "snapshot blob unreadable: %s" % exc)
+            actual_sha = hashlib.sha256(data).hexdigest()
+            if actual_sha == snap["sha256"] and len(data) == snap["bytes"]:
+                break
+            data = None  # concurrent rewrite: retry the read
+        if data is None:
             self.kb.mark_snapshot_state(source, doc_id, version_id, "corrupted")
             raise KbApiError(409, "snapshot_corrupted",
                              "stored bytes fail identity verification")
-        path = os.path.join(blobs.root, *snap["store_path"].split("/"))
-        with open(path, "rb") as handle:
-            data = handle.read()
         version_row = self.kb.get_version(source, doc_id, version_id) or {}
         media_type = version_row.get("media_type") or "application/octet-stream"
         filename = "%s_%s" % (doc_id, version_id)

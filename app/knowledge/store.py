@@ -401,14 +401,39 @@ class KnowledgeStore:
                 if not exists:
                     new_versions += 1
                     new_rows.append(row)
+                # S03: version-level PUBLIC availability basis. publication
+                # evidence (published_at/filing_date) outranks the report
+                # period - a period end never impersonates a publication
+                # time; without any basis the value stays unknown (NULL).
+                public_at = row.get("public_available_at")
+                public_basis = row.get("public_time_basis")
+                if not public_at:
+                    doc_row = conn.execute(
+                        "SELECT published_at, filing_date FROM kb_documents"
+                        " WHERE source=? AND doc_id=?",
+                        (row["source"], row["doc_id"])).fetchone()
+                    if doc_row and doc_row["published_at"]:
+                        public_at = doc_row["published_at"]
+                        public_basis = "published_at"
+                    elif doc_row and doc_row["filing_date"]:
+                        public_at = doc_row["filing_date"]
+                        public_basis = "filing_date"
+                    else:
+                        public_at, public_basis = None, "unknown"
                 conn.execute(
                     "INSERT INTO kb_versions ("
                     " source, doc_id, version_id, sha256, bytes, media_type, ext, rel_path,"
-                    " is_current, state, content_changed_at, synced_at, first_observed_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                    " is_current, state, content_changed_at, synced_at, first_observed_at,"
+                    " public_available_at, public_time_basis)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                     " ON CONFLICT(source, doc_id, version_id) DO UPDATE SET"
                     "  is_current=excluded.is_current, state=excluded.state,"
-                    "  rel_path=excluded.rel_path, synced_at=excluded.synced_at",
+                    "  rel_path=excluded.rel_path, synced_at=excluded.synced_at,"
+                    "  public_available_at=COALESCE(excluded.public_available_at,"
+                    "    public_available_at),"
+                    "  public_time_basis=CASE WHEN excluded.public_available_at"
+                    "    IS NOT NULL THEN excluded.public_time_basis"
+                    "    ELSE public_time_basis END",
                     (
                         row["source"], row["doc_id"], row["version_id"],
                         row.get("sha256"), row.get("bytes"), row.get("media_type"),
@@ -417,6 +442,7 @@ class KnowledgeStore:
                         row.get("content_changed_at"), synced_at,
                         row.get("first_observed_at") or row.get("synced_at")
                         or synced_at,
+                        public_at, public_basis,
                     ),
                 )
             # S07: outbox enqueue lives in the SAME transaction as the
@@ -820,12 +846,24 @@ class KnowledgeStore:
         return row["s"]
 
     # ----------------------------------------------------- embeddings & runs
-    def get_embedding(self, model: str, block_id: str) -> Optional[List[float]]:
+    def get_embedding(self, model: str, block_id: str,
+                      dimensions: Optional[int] = None) -> Optional[List[float]]:
+        """S10: cache identity is (model, dims, block). Same model name
+        under a different provider/dimension never reuses another's row."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT vector_json FROM block_embeddings WHERE model=? AND block_id=?",
+                "SELECT dim, vector_json FROM block_embeddings"
+                " WHERE model=? AND block_id=?",
                 (model, block_id)).fetchone()
-        return json.loads(row["vector_json"]) if row else None
+        if not row:
+            return None
+        if dimensions and row["dim"] != dimensions:
+            return None  # cross-dimension reuse refused
+        return json.loads(row["vector_json"])
+
+    def get_embedding_for(self, model: str, dimensions: int,
+                          block_id: str) -> Optional[List[float]]:
+        return self.get_embedding(model, block_id, dimensions=dimensions)
 
     def put_embeddings(self, model: str, vectors: Dict[str, List[float]]) -> None:
         now = utc_now()

@@ -124,34 +124,28 @@ def write_candidate(directory: str, name: str, content: str,
         new_hash = _sha256_text(content)
 
         if os.path.exists(target):
-            with open(target, "r", encoding="utf-8") as handle:
-                current = handle.read()
-            current_hash = _sha256_text(current)
-            if current_hash == new_hash:
-                return {"outcome": "unchanged", "path": target}
-            if recorded.get("last_hash") != current_hash:
-                # human edit or unknown change since our last write: the
-                # new content becomes a fresh append-only candidate file
-                candidate = _unique_candidate(directory, name, content)
-                return {"outcome": "preserved_with_candidate", "path": target,
-                        "candidate_path": candidate}
-        # safe to write: absent, or still exactly our last content.
-        # R10: re-read right before replacing to narrow the check-to-write
-        # window against external editors/Syncthing.
-        if os.path.exists(target):
-            with open(target, "r", encoding="utf-8") as handle:
-                if _sha256_text(handle.read()) != current_hash:
-                    candidate = _unique_candidate(directory, name, content)
-                    return {"outcome": "preserved_with_candidate",
-                            "path": target, "candidate_path": candidate}
-        fd, tmp = tempfile.mkstemp(prefix=".cand-", dir=directory)
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(content)
-        os.replace(tmp, target)
-        manifest["files"][name] = {"last_hash": new_hash, "owner": owner,
-                                   "written_at": utc_now()}
-        _save_manifest(directory, manifest)
-        return {"outcome": "written", "path": target}
+            # S02: the main name is written exactly ONCE (exclusive first
+            # create). Every later export - even when the file still looks
+            # untouched - is an append-only candidate: no read-hash-then-
+            # replace sequence remains for an external editor to race, so
+            # the main file can never lose human content.
+            if recorded.get("last_hash") == new_hash:
+                with open(target, "r", encoding="utf-8") as handle:
+                    if _sha256_text(handle.read()) == new_hash:
+                        return {"outcome": "unchanged", "path": target}
+            candidate = _unique_candidate(directory, name, content)
+            return {"outcome": "preserved_with_candidate", "path": target,
+                    "candidate_path": candidate}
+        # first creation: exclusive create; a losing racer falls back to a
+        # candidate instead of overwriting the winner
+        if _exclusive_create(target, content):
+            manifest["files"][name] = {"last_hash": new_hash, "owner": owner,
+                                       "written_at": utc_now()}
+            _save_manifest(directory, manifest)
+            return {"outcome": "written", "path": target}
+        candidate = _unique_candidate(directory, name, content)
+        return {"outcome": "preserved_with_candidate", "path": target,
+                "candidate_path": candidate}
     finally:
         lock.release()
 

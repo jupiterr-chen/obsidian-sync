@@ -139,7 +139,17 @@ class IndexSearchTest(unittest.TestCase):
         result = search(self.kb, "margin", SearchFilters(
             as_of="2026-08-01T00:00:00Z", as_of_mode="system"))
         self.assertEqual(result["hits"], [])
-        # public mode uses report_date 2026-06-30
+        # S03: public mode needs PUBLICATION evidence - the fixture docs
+        # carry only report_date, so a July cutoff must see nothing; add a
+        # published basis before expecting visibility
+        result = search(self.kb, "margin", SearchFilters(
+            as_of="2026-07-01T00:00:00Z", as_of_mode="public"))
+        self.assertEqual(result["hits"], [])
+        self.kb.upsert_documents([dict(_doc("reports", "R1", "EXAMPLE"),
+                                      published_at="2026-06-30T00:00:00Z")],
+                                 "2026-07-01T00:00:00Z")
+        self.kb.upsert_versions([_version("reports", "R1", "v1", "a" * 64)],
+                                "2026-07-01T00:00:00Z")
         result = search(self.kb, "margin", SearchFilters(
             as_of="2026-07-01T00:00:00Z", as_of_mode="public"))
         self.assertGreater(len(result["hits"]), 0)

@@ -103,6 +103,11 @@ class SyncService:
                         "is_current": bool(row["is_current"]),
                         "state": row["state"] or "ready",
                         "content_changed_at": row["content_changed_at"],
+                        # S03: publication evidence flows from the document
+                        # into each version's public-time basis
+                        "public_available_at": row["published_at"],
+                        "public_time_basis": ("published_at"
+                                              if row["published_at"] else None),
                     })
             if current_doc is not None:
                 self._commit_document(current_doc, seen_versions, stats, digest)
