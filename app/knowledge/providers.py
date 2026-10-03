@@ -85,6 +85,9 @@ class _HttpProvider:
         self.egress_allowed = bool(egress_allowed)
         self.timeout = timeout
         self.max_retries = max_retries
+        # T02: optional per-PHYSICAL-ATTEMPT gate; budgeted_embed / the
+        # analysis runner attach the ledger so internal retries are gated
+        self.attempt_ledger = None
 
     # ---------------------------------------------------------------- http
     def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:

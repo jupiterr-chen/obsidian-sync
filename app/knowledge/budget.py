@@ -82,11 +82,13 @@ class BudgetLedger:
     _TOTALS_SQL = """
         SELECT
           (SELECT COALESCE(SUM(input_tokens),0) FROM usage_events) AS used_i,
-          (SELECT COUNT(*) FROM usage_events) AS calls,
+          (SELECT COUNT(*) FROM usage_events
+             WHERE counts_request = 1) AS calls,
           (SELECT COALESCE(SUM(est_input),0) FROM budget_reservations
              WHERE status IN ('reserved')) AS res_e,
           (SELECT COUNT(*) FROM budget_reservations
-             WHERE status IN ('reserved')) AS res_r,
+             WHERE status IN ('reserved')
+               AND counts_request = 1) AS res_r,
           (SELECT COUNT(*) FROM usage_events WHERE kind='vision') AS used_p,
           (SELECT COUNT(*) FROM budget_reservations
              WHERE status IN ('reserved','unknown')
@@ -110,7 +112,8 @@ class BudgetLedger:
 
     # -------------------------------------------------------- reservation
     def reserve(self, kind: str, est_input: int, run_id: Optional[str] = None,
-                counts_as_page: bool = False) -> int:
+                counts_as_page: bool = False,
+                count_request: bool = True) -> int:
         est_input = max(1, int(est_input))
         budget = self.budget
         # S01: check and insert share ONE BEGIN IMMEDIATE write transaction,
@@ -129,7 +132,8 @@ class BudgetLedger:
                         " used+reserved=%d, request=%d, cap=%d"
                         % (totals["input"], est_input,
                            budget.max_total_input_tokens))
-                if (budget.max_requests_total is not None
+                if (count_request
+                        and budget.max_requests_total is not None
                         and totals["requests"] + 1 > budget.max_requests_total):
                     raise BudgetExceeded("budget_exceeded_max_requests")
                 if counts_as_page and budget.max_pages_total is not None \
@@ -137,10 +141,10 @@ class BudgetLedger:
                     raise BudgetExceeded("budget_exceeded_max_pages")
                 cur = conn.execute(
                     "INSERT INTO budget_reservations (kind, est_input,"
-                    " status, run_id, created_at) VALUES (?,?,?,?,"
-                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    " status, run_id, created_at, counts_request)"
+                    " VALUES (?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'),?)",
                     ("vision-page" if counts_as_page else kind, est_input,
-                     "reserved", run_id))
+                     "reserved", run_id, 1 if count_request else 0))
                 reservation_id = cur.lastrowid
             except Exception:
                 conn.execute("ROLLBACK")
@@ -160,7 +164,7 @@ class BudgetLedger:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 row = conn.execute(
-                    "SELECT kind, est_input, status FROM"
+                    "SELECT kind, est_input, status, counts_request FROM"
                     " budget_reservations WHERE id=?",
                     (reservation_id,)).fetchone()
                 if row is None:
@@ -172,13 +176,15 @@ class BudgetLedger:
                 conn.execute(
                     "INSERT INTO usage_events (provider, model, kind,"
                     " input_tokens, output_tokens, cost_basis, run_id,"
-                    " reservation_id, created_at)"
+                    " reservation_id, created_at, counts_request)"
                     " VALUES (?,?,?,?,?,?,?,?,"
-                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'),?)",
                     (usage.provider, usage.model,
                      usage_kind_for_reservation(row["kind"]),
                      input_tokens, usage.output_tokens, usage.cost_basis,
-                     run_id, reservation_id))
+                     run_id, reservation_id,
+                     row["counts_request"] if "counts_request" in row.keys()
+                     else 1))
                 conn.execute(
                     "UPDATE budget_reservations SET status='settled',"
                     " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"
@@ -212,7 +218,7 @@ class BudgetLedger:
             conn.execute("BEGIN IMMEDIATE")
             try:
                 current = conn.execute(
-                    "SELECT kind, est_input, status FROM"
+                    "SELECT kind, est_input, status, counts_request FROM"
                     " budget_reservations WHERE id=?",
                     (reservation_id,)).fetchone()
                 if current is None or current["status"] in ("settled", "unknown"):
@@ -221,12 +227,14 @@ class BudgetLedger:
                 conn.execute(
                     "INSERT INTO usage_events (provider, model, kind,"
                     " input_tokens, output_tokens, cost_basis, run_id,"
-                    " reservation_id, created_at)"
+                    " reservation_id, created_at, counts_request)"
                     " VALUES ('unknown-provider','unknown-model',?,?,0,"
                     "'estimate:not-provider-measured',?,?,"
-                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'))",
+                    "strftime('%Y-%m-%dT%H:%M:%SZ','now'),?)",
                     (current["kind"], current["est_input"], run_id,
-                     reservation_id))
+                     reservation_id,
+                     current["counts_request"] if "counts_request" in
+                     current.keys() else 1))
                 conn.execute(
                     "UPDATE budget_reservations SET status='unknown',"
                     " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"

@@ -46,7 +46,13 @@ def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
                             usage.cost_basis)
         return vectors, usage
     est = sum(estimate_tokens(t) for t in texts) + 8
-    reservation = ledger.reserve("embedding", est)
+    # T02: when the provider carries a per-attempt gate, requests are
+    # counted per PHYSICAL attempt; the outer reservation then covers only
+    # tokens so cap=1 allows exactly one attempt, not zero
+    gated = hasattr(embedder, "attempt_ledger")
+    reservation = ledger.reserve("embedding", est, count_request=not gated)
+    if gated:
+        embedder.attempt_ledger = ledger
     try:
         vectors, usage = embedder.embed(texts)
     except Exception:

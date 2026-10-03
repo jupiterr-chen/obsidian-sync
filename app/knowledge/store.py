@@ -198,7 +198,8 @@ CREATE TABLE IF NOT EXISTS usage_events (
     cost_basis TEXT NOT NULL DEFAULT 'unknown',
     run_id TEXT,
     created_at TEXT NOT NULL,
-    reservation_id INTEGER UNIQUE     -- S01: idempotent settlement link
+    reservation_id INTEGER UNIQUE,    -- S01: idempotent settlement link
+    counts_request INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
 CREATE TABLE IF NOT EXISTS budget_reservations (
@@ -208,7 +209,8 @@ CREATE TABLE IF NOT EXISTS budget_reservations (
     status TEXT NOT NULL,             -- reserved | settled | unknown | released
     run_id TEXT,
     created_at TEXT NOT NULL,
-    settled_at TEXT
+    settled_at TEXT,
+    counts_request INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS claims (
     claim_id TEXT PRIMARY KEY,
@@ -342,6 +344,8 @@ class KnowledgeStore:
             ("kb_versions", "public_available_at", "TEXT"),
             ("kb_versions", "public_time_basis", "TEXT"),
             ("usage_events", "reservation_id", "INTEGER"),
+            ("budget_reservations", "counts_request",
+             "INTEGER NOT NULL DEFAULT 1"),
             ("kb_documents", "revision", "INTEGER NOT NULL DEFAULT 1"),
         )
         for table, column, decl in migrations:
@@ -439,8 +443,11 @@ class KnowledgeStore:
                     doc_published = doc_row["published_at"] if doc_row else None
                     doc_filed = doc_row["filing_date"] if doc_row else None
                     # the version's true first observation: the STORED value
-                    # for existing rows (the incoming synced_at refreshes on
-                    # every reconciliation and would falsely "delay" v1)
+                    # for existing rows; for NEW rows the upsert's synced_at
+                    # parameter IS this system's first observation of them
+                    # (a row dict without either leaves row_first None,
+                    # which must NEVER mean "unconditionally bind" - the
+                    # method parameter closes that hole)
                     stored = conn.execute(
                         "SELECT first_observed_at FROM kb_versions"
                         " WHERE source=? AND doc_id=? AND version_id=?",
@@ -451,7 +458,8 @@ class KnowledgeStore:
                         row_first = stored["first_observed_at"]
                     elif not stored:
                         row_first = (row.get("first_observed_at")
-                                     or row.get("synced_at"))
+                                     or row.get("synced_at")
+                                     or synced_at)
                     if doc_published and (not row_first or doc_published >= row_first):
                         # publication evidence is not OLDER than the
                         # version's first observation -> it can describe it
