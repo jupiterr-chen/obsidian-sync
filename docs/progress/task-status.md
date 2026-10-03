@@ -1,5 +1,7 @@
 # 任务台账
 
+> **最新独立复核：第四轮（2026-10-03，cd3bb5d）NEEDS_CHANGES。** 301 tests OK/2 skip，但U01–U05未闭环，见[结果](FOURTH-REVIEW-20261003.md)、[任务书](../21-cutover-blockers-taskbook.md)、[提示词](../22-cutover-blockers-prompt.md)。用户条件式迁移/停机授权已获得；本次因缺陷和G2证据不足未停旧栈。GLM修改已结束，影子提取仍运行。以下完成声明为历史记录。
+
 > **最新独立复核：第三轮（2026-10-03，源码 cb254df）NEEDS_CHANGES。** 287 tests OK / 2 skipped；T01–T07 共4 P1、3 P2待修复。先读[第三轮报告](THIRD-REVIEW-20261003.md)、[下一步任务书](../19-release-readiness-taskbook.md)与[提示词](../20-release-readiness-prompt.md)。先过G1再做小批影子验收，暂不启动全量重提取或生产切换。以下完成声明为历史记录，以最新独立验收为准。
 
 > **最新独立复核：2026-10-03，基线 4949dcd，NEEDS_CHANGES。** 268 回归 OK（2 skipped），新增反例确认 S01–S10 尚待处理（6 P1 / 4 P2）。此前 R01–R15 全 fixed/RF7 闭环是提交者历史声明，未获本轮独立验收。先读[第二轮报告](RE-REVIEW-20261003.md)、[SR 任务书](../17-second-review-taskbook.md)及[执行提示词](../18-second-review-fix-prompt.md)。真实 NOT_RUN/BLOCKED 不变；本次未操作生产。以下历史记录保留。
@@ -126,3 +128,15 @@
 |N4/G1|独立复验|未通过|T01–T07及全回归GREEN，契约无虚假声明|
 |N5|小批影子验收|待G1；脚本模板可先准备|docs/08真实证据，未运行保留NOT_RUN|
 |N6/G2|全量/切换变更包|待影子结果|范围/预算/恢复明确，实际变更单独授权|
+
+## 第四轮独立验收（2026-10-03）
+
+|条目|状态|接续|
+|---|---|---|
+|U01 旧库账本迁移|OPEN/P1|C1|
+|U02 三类provider请求门禁和attempt终态|OPEN/P1|C2|
+|U03 旧版本unknown时间|OPEN/P1|C3|
+|U04 真实claim导出幂等|OPEN/P2|C4|
+|U05 影子身份/外发/范围/标注/对账|OPEN/P1|C5|
+|G1/G2|未独立通过|C6及真实验收|
+|条件式迁移/停旧栈授权|已获得|条件通过后执行；本轮未停服|

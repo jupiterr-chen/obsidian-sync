@@ -1,0 +1,124 @@
+{
+  "source_commit": "cd3bb5d3fd560ca7876d945d7547494beae47347",
+  "date": "2026-10-03",
+  "verdict": "NEEDS_CHANGES",
+  "regression": {
+    "command": "PYTHONPATH=app python -m unittest discover -s app/tests",
+    "tests": 301,
+    "skipped": 2,
+    "seconds": 63.782,
+    "exit_code": 0
+  },
+  "prior_probe_command": "python docs/progress/third-review-probe-20261003.py",
+  "probe_command": "python docs/progress/fourth-review-probe-20261003.py",
+  "local_probe_outputs": {
+    "old_db_budget": {
+      "opened": true,
+      "budget_ok": false,
+      "error": "no such column: counts_request",
+      "missing_usage_counts_request": true
+    },
+    "chat_retry_cap": {
+      "cap": 1,
+      "http_attempts": 2,
+      "result": "failed",
+      "accounted_requests": 1
+    },
+    "vision_retry_cap": {
+      "cap": 1,
+      "http_attempts": 2,
+      "accounted_requests": 1
+    },
+    "embedding_success_attempt_lifecycle": {
+      "reservations": [
+        {
+          "kind": "embedding",
+          "status": "settled",
+          "est_input": 18
+        },
+        {
+          "kind": "http-attempt",
+          "status": "reserved",
+          "est_input": 1
+        }
+      ],
+      "totals": {
+        "input": 6,
+        "requests": 1,
+        "pages": 0
+      }
+    },
+    "legacy_unknown_public_time": {
+      "first_observed_at": null,
+      "public_available_at": "2026-01-01T00:00:00Z",
+      "july_hits": 1
+    },
+    "unchanged_claim_export": {
+      "revision": 1,
+      "exports": 3,
+      "markdown_files": 3
+    }
+  },
+  "server_readonly_observations": {
+    "observed_at": "2026-10-03T15:34:17.773340+00:00",
+    "sample_count": 30,
+    "manifest_missing_sha256": 30,
+    "snapshots": 61,
+    "snapshots_outside_manifest": 31,
+    "extracts_outside_manifest": 31,
+    "job_counts": [
+      [
+        "extract",
+        "done",
+        48
+      ],
+      [
+        "snapshot",
+        "done",
+        61
+      ],
+      [
+        "extract",
+        "pending",
+        12
+      ],
+      [
+        "extract",
+        "running",
+        1
+      ]
+    ],
+    "usage_by_kind": [],
+    "provider_egress_flags": {
+      "chat": true,
+      "embedding": false,
+      "vision_ocr": true
+    },
+    "ocr_fallback": "vision-api",
+    "production_usage_columns": [
+      "id",
+      "provider",
+      "model",
+      "kind",
+      "input_tokens",
+      "output_tokens",
+      "cost_basis",
+      "run_id",
+      "created_at"
+    ],
+    "research_services": [
+      "research-kb-library|Up 2 days (healthy)",
+      "research-kb-status-collector|Up 2 days",
+      "research-kb-syncthing|Up 2 days (healthy)"
+    ]
+  },
+  "issues": {
+    "U01": "old schema budget missing counts_request",
+    "U02": "chat/vision retry gates and attempt lifecycle",
+    "U03": "legacy unknown public time incorrectly filled",
+    "U04": "actual claim export changes render timestamp",
+    "U05": "shadow identity/egress/isolation/acceptance evidence"
+  },
+  "production_action": "none; old services remain running",
+  "authorization": "Conditional review-pass migration/shutdown authorization already granted; blocked by defects and incomplete evidence, not permission."
+}
