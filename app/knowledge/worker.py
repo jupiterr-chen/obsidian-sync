@@ -29,6 +29,28 @@ from .sync import SyncService
 HEARTBEAT_SECONDS = 15
 
 
+def consume_impact_outbox(kb, limit: int = 25) -> int:
+    """R15: drain the durable impact outbox in batches.
+
+    Each pending (source, doc_id, version_id) becomes review proposals for
+    claims citing the document; the row is consumed only after the
+    (idempotent) analysis ran. Crash at any point leaves unconsumed rows
+    for the next cycle - nothing is inferred from sync timestamps.
+    """
+    from .memory import impact_analysis as _impact
+
+    created = 0
+    while True:
+        batch = kb.pending_impacts(limit=limit)
+        if not batch:
+            return created
+        for row in batch:
+            impact = _impact(kb, row["source"], row["doc_id"],
+                             row["version_id"])
+            created += len(impact["new_proposals"])
+            kb.mark_impact_consumed(row["id"])
+
+
 def worker_state_path(knowledge_db: str) -> str:
     return os.path.join(os.path.dirname(os.path.abspath(knowledge_db)) or ".",
                         "knowledge-worker.json")
@@ -71,20 +93,10 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             cycle["extracts"] = runner.run_extract_jobs()
             cycle["index"] = build_generation(kb)
 
-            # A20 hooks: new versions discovered this cycle become review
-            # proposals for claims citing the affected documents.
-            proposals = 0
-            new_versions = cycle["sync"].get("new_versions", 0)
-            if new_versions:
-                with kb._lock:
-                    rows = kb._conn.execute(
-                        "SELECT DISTINCT source, doc_id, version_id FROM kb_versions"
-                        " WHERE synced_at = (SELECT MAX(synced_at) FROM kb_versions)"
-                        " LIMIT ?", (max_impact_versions,)).fetchall()
-                for row in rows:
-                    impact = impact_analysis(kb, row["source"], row["doc_id"],
-                                             row["version_id"])
-                    proposals += len(impact["new_proposals"])
+            # A20 hooks (R15): durable outbox drives impact analysis -
+            # paged until empty, no time-stamp heuristics, crash-safe.
+            proposals = consume_impact_outbox(kb,
+                                              limit=max_impact_versions)
             cycle["impact_proposals"] = proposals
             cycle["counts"] = kb.counts()
             generation = kb.active_generation()

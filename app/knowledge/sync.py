@@ -134,6 +134,9 @@ class SyncService:
                 self.kb.emit_event("version.registered", row["source"], row["doc_id"],
                                    row["version_id"],
                                    {"state": row.get("state"), "sha256": row.get("sha256")})
+            # R15: bind pending impact analysis to the reconciliation itself
+            if ver_stats["new_version_rows"]:
+                self.kb.enqueue_impact(ver_stats["new_version_rows"])
         source_stats = stats["sources"].setdefault(doc["source"], {
             "documents": 0, "versions": 0, "snapshot_jobs_registered": 0})
         source_stats["documents"] += 1

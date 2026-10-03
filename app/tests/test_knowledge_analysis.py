@@ -324,6 +324,9 @@ class AnalysisExportTest(unittest.TestCase):
             execute_analysis_run(kb, created["run_id"], "毛利率如何？", chat,
                                  retriever=lambda q, k: search(kb, q, None, limit=k).get("hits", []))
             out_dir = os.path.join(temp_dir(), "vault-gen")
+            from knowledge.writeback import register_write_root
+
+            register_write_root(out_dir)
             result = export_analysis_runs(kb, out_dir)
             self.assertEqual(result["count"], 1)
             path = os.path.join(out_dir, "%s.md" % created["run_id"])

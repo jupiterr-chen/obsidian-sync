@@ -246,6 +246,16 @@ CREATE TABLE IF NOT EXISTS decisions (
     claim_refs_json TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS impact_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending | consumed
+    created_at TEXT NOT NULL,
+    consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_impact_outbox_status ON impact_outbox(status);
 CREATE TABLE IF NOT EXISTS review_proposals (
     proposal_id TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
@@ -1016,6 +1026,32 @@ class KnowledgeStore:
         item = dict(row)
         item["claim_refs"] = json.loads(item.pop("claim_refs_json") or "[]")
         return item
+
+    # ------------------------------------------------------ impact outbox
+    def enqueue_impact(self, rows: List[Dict[str, Any]]) -> int:
+        """R15: durable pending impact-analysis tasks, written in the same
+        reconciliation pass that registers the new versions."""
+        now = utc_now()
+        with self._tx() as conn:
+            for row in rows:
+                conn.execute(
+                    "INSERT INTO impact_outbox (source, doc_id, version_id,"
+                    " status, created_at) VALUES (?,?,?,'pending',?)",
+                    (row["source"], row["doc_id"], row["version_id"], now))
+        return len(rows)
+
+    def pending_impacts(self, limit: int = 100) -> List[Dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM impact_outbox WHERE status='pending'"
+                " ORDER BY id LIMIT ?", (max(1, int(limit)),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_impact_consumed(self, impact_id: int) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE impact_outbox SET status='consumed', consumed_at=?"
+                " WHERE id=?", (utc_now(), impact_id))
 
     def add_review_proposal(self, proposal: Dict[str, Any]) -> bool:
         with self._tx() as conn:

@@ -129,7 +129,10 @@ class ClaimStateMachineTest(unittest.TestCase):
 
 class WriteBackTest(unittest.TestCase):
     def setUp(self):
+        from knowledge.writeback import register_write_root
+
         self.dir = os.path.join(temp_dir(), "vault-generated")
+        register_write_root(self.dir)
 
     def test_write_preserves_human_edits_and_conflicts(self):
         first = write_candidate(self.dir, "clm-a.md", "# v1 content")

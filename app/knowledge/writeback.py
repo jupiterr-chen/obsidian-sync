@@ -1,10 +1,18 @@
 """Safe write-back into generated areas (P5-03, docs/05).
 
-Rules (A15): writes only into explicitly registered directories; a file is
-overwritten only when its content hash still equals the last hash this
-module itself wrote; any human edit or sync conflict stops the overwrite
-and preserves the original plus a timestamped candidate file. Sync-conflict
-files are never touched or deleted.
+Rules (A15, R10): writes only into explicitly REGISTERED directories; a
+file is overwritten only when its content hash still equals the last hash
+this module itself wrote (re-checked immediately before the atomic
+replace); any human edit or sync conflict stops the overwrite and
+preserves the original plus a UNIQUE append-only candidate file.
+Candidates use exclusive creation with random identity - same-second
+exports never collide and previously written candidates are never
+modified. Sync-conflict files are never touched or deleted.
+
+Ownership limits (documented, per the remediation taskbook): external
+editors and Syncthing do not obey our locks, so the hash re-check narrows
+- but cannot fully close - the read/replace race; the manifest itself is
+guarded by a per-directory advisory file lock for multi-process writers.
 """
 
 from __future__ import annotations
@@ -12,17 +20,37 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
 import tempfile
 from typing import Any, Dict, Optional
+
+from library.locking import FileLock
 
 from .store import KnowledgeStore, utc_now
 
 MANIFEST_NAME = ".knowledge-writeback.json"
+MANIFEST_LOCK = ".knowledge-writeback.lock"
 CONFLICT_MARKERS = ("sync-conflict", "conflicted copy")
+
+_WRITE_ROOTS: set = set()
 
 
 class WriteBackError(Exception):
     pass
+
+
+def register_write_root(path: str) -> None:
+    """Whitelist a directory tree that generated output may live in."""
+    _WRITE_ROOTS.add(os.path.realpath(path))
+
+
+def _require_registered_root(directory: str) -> None:
+    real = os.path.realpath(directory)
+    for root in _WRITE_ROOTS:
+        if real == root or real.startswith(root + os.sep):
+            return
+    raise WriteBackError(
+        "write target %r is not a registered write root" % directory)
 
 
 def _sha256_text(text: str) -> str:
@@ -49,6 +77,31 @@ def _save_manifest(directory: str, manifest: Dict[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def _exclusive_create(path: str, content: str) -> bool:
+    """Create a new file exclusively; False when it already exists."""
+    try:
+        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(content)
+    return True
+
+
+def _unique_candidate(directory: str, name: str, content: str) -> str:
+    """R10: append-only candidate with exclusive creation and random
+    identity - two exports in the same second produce two files, and no
+    candidate is ever overwritten."""
+    base = os.path.splitext(name)[0]
+    stamp = utc_now().replace(":", "").replace("-", "")[:15]
+    while True:
+        candidate = os.path.join(
+            directory, "%s.candidate-%s-%s.md"
+            % (base, stamp, secrets.token_hex(4)))
+        if _exclusive_create(candidate, content):
+            return candidate
+
+
 def write_candidate(directory: str, name: str, content: str,
                     owner: str = "knowledge") -> Dict[str, Any]:
     """Write or refresh one generated file under a registered directory.
@@ -59,36 +112,48 @@ def write_candidate(directory: str, name: str, content: str,
         raise WriteBackError("invalid candidate name %r" % name)
     if any(marker in name.lower() for marker in CONFLICT_MARKERS):
         raise WriteBackError("refusing to touch conflict-marked files")
+    _require_registered_root(directory)
     os.makedirs(directory, exist_ok=True)
     target = os.path.join(directory, name)
-    manifest = _load_manifest(directory)
-    recorded = manifest["files"].get(name, {})
-    new_hash = _sha256_text(content)
+    lock = FileLock(os.path.join(directory, MANIFEST_LOCK))
+    if not lock.acquire(blocking=True, timeout=10):
+        raise WriteBackError("manifest lock busy in %r" % directory)
+    try:
+        manifest = _load_manifest(directory)
+        recorded = manifest["files"].get(name, {})
+        new_hash = _sha256_text(content)
 
-    if os.path.exists(target):
-        with open(target, "r", encoding="utf-8") as handle:
-            current = handle.read()
-        current_hash = _sha256_text(current)
-        if current_hash == new_hash:
-            return {"outcome": "unchanged", "path": target}
-        if recorded.get("last_hash") != current_hash:
-            # human edit or unknown change since our last write: never overwrite
-            stamp = utc_now().replace(":", "").replace("-", "")[:15]
-            candidate = os.path.join(
-                directory, "%s.candidate-%s.md" % (os.path.splitext(name)[0], stamp))
-            with open(candidate, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(content)
-            return {"outcome": "preserved_with_candidate", "path": target,
-                    "candidate_path": candidate}
-    # safe to write: absent, or still exactly our last content
-    fd, tmp = tempfile.mkstemp(prefix=".cand-", dir=directory)
-    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-        handle.write(content)
-    os.replace(tmp, target)
-    manifest["files"][name] = {"last_hash": new_hash, "owner": owner,
-                               "written_at": utc_now()}
-    _save_manifest(directory, manifest)
-    return {"outcome": "written", "path": target}
+        if os.path.exists(target):
+            with open(target, "r", encoding="utf-8") as handle:
+                current = handle.read()
+            current_hash = _sha256_text(current)
+            if current_hash == new_hash:
+                return {"outcome": "unchanged", "path": target}
+            if recorded.get("last_hash") != current_hash:
+                # human edit or unknown change since our last write: the
+                # new content becomes a fresh append-only candidate file
+                candidate = _unique_candidate(directory, name, content)
+                return {"outcome": "preserved_with_candidate", "path": target,
+                        "candidate_path": candidate}
+        # safe to write: absent, or still exactly our last content.
+        # R10: re-read right before replacing to narrow the check-to-write
+        # window against external editors/Syncthing.
+        if os.path.exists(target):
+            with open(target, "r", encoding="utf-8") as handle:
+                if _sha256_text(handle.read()) != current_hash:
+                    candidate = _unique_candidate(directory, name, content)
+                    return {"outcome": "preserved_with_candidate",
+                            "path": target, "candidate_path": candidate}
+        fd, tmp = tempfile.mkstemp(prefix=".cand-", dir=directory)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
+        os.replace(tmp, target)
+        manifest["files"][name] = {"last_hash": new_hash, "owner": owner,
+                                   "written_at": utc_now()}
+        _save_manifest(directory, manifest)
+        return {"outcome": "written", "path": target}
+    finally:
+        lock.release()
 
 
 def render_claim_candidate(claim: Dict[str, Any],
