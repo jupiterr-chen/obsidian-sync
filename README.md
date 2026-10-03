@@ -2,7 +2,7 @@
 
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
 
-当前交付：**P0 设计基线 + M0 整合 + P1-P6 离线实现**。第一层（`app/library/`：目录、入库、小时调度、版本化原文服务、变更账本、状态面板）与知识层（`app/knowledge/`：不可变快照、提取与证据块、词法/混合检索、`/api/kb/v1`、研究记忆、安全写回、worker 调度与备份演练）均已实现并通过 **202 项测试（离线/合成）**。尚未启动生产服务、执行真实全量回填、调用真实模型或修改现有 Vault；真实数据/生产/模型相关验收保持 BLOCKED（见 docs/progress/ 各阶段报告与 HANDOFF）。
+当前交付：设计、M0 整合和 P1–P6 源码已落地，并在真实语料上做过部分处理。**最新独立复核（2026-10-03，基线 4949dcd）：NEEDS_CHANGES，6 个 P1、4 个 P2 待修复。** 本地 268 项回归通过（2 skipped），新增边界反例未通过；不能据此切换生产。旧栈和既有回填状态见 HANDOFF，真实质量/性能/持续运行验收仍保留 NOT_RUN/BLOCKED。
 
 ## 阅读顺序
 
@@ -20,7 +20,7 @@
 ## 工程结构
 
 - `app/library/`：**已运行的第一层服务**（标准库实现）：统一目录、适配接入、Markdown 卡片、版本化原文服务、小时调度、文件锁、变更账本与状态面板。
-- `app/tests/`：全部测试（202 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
+- `app/tests/`：全部测试（本轮运行 268 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
 - `app/knowledge/`：知识层（P1-P6）：不可变快照 store、提取/证据块、质量与 OCR 路由、词法+RRF 混合检索、`/api/kb/v1`、事件流、研究记忆（claim/decision/影响分析）、安全写回、worker 调度。CLI：`python -m knowledge sync|run-snapshots|run-extracts|rebuild-index|serve-kb|worker|sample|measure|evidence-links|status`。
 - `src/research_kb/`：目标模块边界职责说明（参考，不建第二套服务）。
 - `contracts/`：版本化数据契约与合成示例。
@@ -36,7 +36,7 @@
 
 ## 下一位agent从这里开始
 
-M0 与 P1-P6 离线部分已完成并验收（各阶段报告在 docs/progress/）。剩余工作全部依赖外部条件：真实源访问（A01/A04/A05/A10/A14 真实部分）、生产服务器（A21/A22、部署）、模型供应商与预算（A16/A17 真实部分）、真实 Vault 写回授权。先读 [HANDOFF](docs/progress/HANDOFF.md) 的缺项清单与续跑起点。
+先读[第二轮评审](docs/progress/RE-REVIEW-20261003.md)、[SR0–SR6 任务书](docs/17-second-review-taskbook.md)和[执行提示词](docs/18-second-review-fix-prompt.md)。当前先完成 S01–S10 源码修复与复验，再继续真实数据验收。无需重做 M0；旧历史 accepted/fixed 声明以最新独立复核为准。
 
 - [主仓库整合任务书](docs/11-integration-taskbook.md)
 - [长任务执行指导书](docs/12-agent-execution-guide.md)
@@ -46,10 +46,16 @@ M0 与 P1-P6 离线部分已完成并验收（各阶段报告在 docs/progress/�
 
 11-14与ADR0002覆盖早期独立仓库假设，任务书不代表实现已完成。
 
-## 最新独立评审（2026-10-02）
+## 首轮独立评审（历史，2026-10-02）
 
 基线534014a：222测试通过（2跳过），迁移保真基本通过；知识层整体NEEDS_CHANGES，15组修复问题，尚不满足生产切换条件。
 
 - [评审结果与问题](docs/progress/INDEPENDENT-REVIEW-20261002.md)
 - [RF0-RF7修复任务书](docs/15-review-remediation-taskbook.md)
 - [直接交给agent的修复提示词](docs/16-review-fix-prompt.md)
+
+## 最新独立复核（2026-10-03）
+
+[第二轮结果](docs/progress/RE-REVIEW-20261003.md) · [证据](docs/progress/re-review-evidence-20261003.json) · [修复任务书](docs/17-second-review-taskbook.md) · [可复制提示词](docs/18-second-review-fix-prompt.md)
+
+R03/R06/R07/R14 首轮具体反例可关闭；其余按第二轮报告继续验收，RF7 未通过。迁移基线保留，本轮未操作生产或真实模型。

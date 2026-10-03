@@ -1,5 +1,7 @@
 # 任务台账
 
+> **最新独立复核：2026-10-03，基线 4949dcd，NEEDS_CHANGES。** 268 回归 OK（2 skipped），新增反例确认 S01–S10 尚待处理（6 P1 / 4 P2）。此前 R01–R15 全 fixed/RF7 闭环是提交者历史声明，未获本轮独立验收。先读[第二轮报告](RE-REVIEW-20261003.md)、[SR 任务书](../17-second-review-taskbook.md)及[执行提示词](../18-second-review-fix-prompt.md)。真实 NOT_RUN/BLOCKED 不变；本次未操作生产。以下历史记录保留。
+
 字段：任务ID | 状态（todo/in_progress/blocked/accepted）| 负责人 | 依赖 | 变更commit | 验收报告 | 阻塞条件 | 下一动作。
 完成度口径：源码实现 / 离线验证 / 全量数据验收 / 生产部署 四类分开记录。
 
@@ -65,3 +67,17 @@
 ## 独立复核追加（2026-10-02，基线534014a）
 
 当前总体NEEDS_CHANGES。M0保真基本通过，222回归OK/2skip；R01-R15重新打开受影响的P1-P6源码验收，原accepted为历史self-review记录，不是独立验收结论。已明确的真实NOT_RUN/BLOCKED仍保留。修复入口为[RF任务书](../15-review-remediation-taskbook.md)，修复任务RF0-RF7当前均todo。
+
+## 第二轮修复台账（独立复核，2026-10-03）
+
+|任务|问题|状态|退出依据|
+|---|---|---|---|
+|SR0|基线与失败回归|todo（独立探针已提供）|转换为断言式 RED 回归|
+|SR1|S01/S07|todo|预算与 outbox 原子性、中断恢复|
+|SR2|S04/S05/S06|todo|返回字节、OCR质量、图片幂等|
+|SR3|S02|todo|人工内容不覆盖|
+|SR4|S03/S08/S10|todo|时间语义、游标、独立召回|
+|SR5|S09|todo|服务正确启动、隔离切换演练|
+|SR6|全部|todo|独立复验及真实缺项清单|
+
+详见 docs/17；本表覆盖此前 RF7 闭环判断，不改写历史修复提交。

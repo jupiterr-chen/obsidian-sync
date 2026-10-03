@@ -1,0 +1,137 @@
+{
+  "review_date": "2026-10-03",
+  "source_commit": "4949dcd375f8a90d82ab73f040d3a1c16fb56e8a",
+  "verdict": "NEEDS_CHANGES",
+  "scope": "local synthetic probes and code review; no production operations or paid model calls",
+  "regression": {
+    "command": "PYTHONPATH=app python -m unittest discover -s app/tests",
+    "tests": 268,
+    "skipped": 2,
+    "seconds": 55.624,
+    "exit_code": 0
+  },
+  "probe_command": "python docs/progress/re-review-probe-20261003.py",
+  "probe_outputs": {
+    "budget_atomicity": {
+      "accepted_ids": [
+        1,
+        2
+      ],
+      "reserved": 12,
+      "cap": 10
+    },
+    "page_cap": {
+      "cap": 1,
+      "accepted": 3,
+      "totals": {
+        "input": 60,
+        "requests": 3,
+        "pages": 0
+      }
+    },
+    "settlement_crash": {
+      "remaining_after_billed_call": 10,
+      "cap": 10,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "calls": 0
+      }
+    },
+    "outbox_crash": {
+      "version_exists": true,
+      "retry_new_versions": 0,
+      "pending": 0
+    },
+    "writeback_race": {
+      "outcome": "written",
+      "remaining_content": "machine-v2"
+    },
+    "public_asof": {
+      "cutoff": "2026-07-01",
+      "published_at": "2026-08-20T12:00:00Z",
+      "hits": 1
+    },
+    "image_duplicate_ocr": {
+      "ocr_calls": 2,
+      "same_extraction": true
+    },
+    "snapshot_read_race": {
+      "returned_text": "EVIL IMAGE",
+      "etag_matches_returned": false
+    },
+    "low_confidence_pdf": {
+      "status": "ready",
+      "block_quality": [
+        "ready"
+      ],
+      "issues": [
+        "page_1_needs_ocr:no_text_layer",
+        "page_1_ocr_applied:low:conf=0.10"
+      ]
+    },
+    "cursor_metadata": {
+      "first": 2,
+      "second": 0,
+      "second_next": null,
+      "remaining_visible": 2
+    },
+    "compose_parse": {
+      "deploy/docker-compose.full.yml": "PASS",
+      "deploy/docker-compose.knowledge.yml": "PASS"
+    },
+    "independent_semantic_recall": {
+      "returned_docs": [
+        "K"
+      ],
+      "missing_semantic_doc": "S"
+    },
+    "library_effective_command": {
+      "service_command": null,
+      "inherited_image_cmd": "CMD [\"python\", \"-m\", \"knowledge\", \"worker\", \"--config\", \"/app-config/knowledge.json\"]"
+    }
+  },
+  "not_independently_run": [
+    "Docker image build/container startup",
+    "server cutover",
+    "real corpus quality benchmark",
+    "production backup restore",
+    "paid providers"
+  ],
+  "issues": {
+    "S01": [
+      "budget_atomicity",
+      "page_cap",
+      "settlement_crash"
+    ],
+    "S02": [
+      "writeback_race"
+    ],
+    "S03": [
+      "public_asof"
+    ],
+    "S04": [
+      "snapshot_read_race"
+    ],
+    "S05": [
+      "low_confidence_pdf"
+    ],
+    "S06": [
+      "image_duplicate_ocr"
+    ],
+    "S07": [
+      "outbox_crash"
+    ],
+    "S08": [
+      "cursor_metadata"
+    ],
+    "S09": [
+      "library_effective_command",
+      "static Dockerfile and CUTOVER inspection"
+    ],
+    "S10": [
+      "independent_semantic_recall",
+      "static cache identity inspection"
+    ]
+  }
+}
