@@ -23,6 +23,9 @@ catalog/
 state/
 vault/
 tools/
+# publishable acceptance/deployment tooling (no runtime data)
+!tools/shadow-acceptance/
+!tools/shadow-acceptance/**
 *.db
 *.db-wal
 *.db-shm
