@@ -81,7 +81,7 @@ def main() -> int:
         register_stages=("snapshot", "extract"),
         extra=config.extra,
     )
-    from knowledge.extract import extract_config_digest  # noqa: F401
+    from library.config import Config
     from knowledge.jobs import JobRunner
     from knowledge.store import KnowledgeStore
     from knowledge.sync import SyncService
@@ -89,15 +89,12 @@ def main() -> int:
     os.makedirs(args.state_dir, exist_ok=True)
     kb = KnowledgeStore(shadow_config.knowledge_db)
     try:
-        # mirror only the sampled identities: a filtered sync is not
-        # supported offline, so mirror everything then process only the
-        # sampled subset via job registration below
+        # mirror the catalog identities, then snapshot+extract; job limits
+        # keep this batch to the sampled scale
         stats = SyncService(kb, shadow_config).run()
-        runner = JobRunner(kb, shadow_config,
-                           __import__("library.config", fromlist=["Config"]).load(
-                               shadow_config.library_config).resolve(
-                               os.path.dirname(os.path.abspath(
-                                   shadow_config.library_config))))
+        library_config = Config.load(shadow_config.library_config).resolve(
+            os.path.dirname(os.path.abspath(shadow_config.library_config)))
+        runner = JobRunner(kb, shadow_config, library_config)
         snap_result = runner.run_snapshot_jobs(limit=len(samples) + 5)
         ext_result = runner.run_extract_jobs(limit=len(samples) + 5)
         report.update({
