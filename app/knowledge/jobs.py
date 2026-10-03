@@ -223,7 +223,9 @@ class JobRunner:
         try:
             return build_ocr_engine(
                 self.config.ocr_config(),
-                provider_specs=(self.config.extra.get("providers") or {}))
+                providers=self._providers(),
+                provider_specs=(self.config.extra.get("providers") or {}),
+                ledger=self._budget_ledger())
         except Exception:
             # vision-api selected but unfilled: run without OCR and let the
             # extraction flag needs_ocr honestly instead of failing the job
@@ -236,7 +238,8 @@ class JobRunner:
             return build_fallback_engine(
                 self.config.ocr_config(),
                 providers=self._providers(),
-                provider_specs=(self.config.extra.get("providers") or {}))
+                provider_specs=(self.config.extra.get("providers") or {}),
+                ledger=self._budget_ledger())
         except Exception:
             return None
 
@@ -244,6 +247,11 @@ class JobRunner:
         from .providers import load_providers
 
         return load_providers(self.config.extra)
+
+    def _budget_ledger(self):
+        from .budget import BudgetLedger, load_budget
+
+        return BudgetLedger(self.kb, load_budget(self.config.extra))
 
     def status(self) -> Dict[str, Any]:
         counts = self.kb.job_counts("snapshot")

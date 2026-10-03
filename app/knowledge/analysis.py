@@ -12,10 +12,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .budget import Budget, BudgetExceeded, BudgetLedger, estimate_tokens
 from .indexing import SearchFilters, search as keyword_search
 from .providers import (
     ChatProvider,
     EmbeddingProvider,
+    EgressNotAllowed,
     ProviderCallError,
     ProviderNotConfigured,
     Usage,
@@ -26,20 +28,29 @@ RRF_K = 60
 CITATION_RE = re.compile(r"\[(\d+)\]")
 
 
-@dataclass
-class Budget:
-    max_input_tokens_per_run: int = 200_000
-    max_total_input_tokens: Optional[int] = None  # None = unlimited (offline)
+def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
+                   ledger: Optional[BudgetLedger] = None,
+                   kb: Optional[KnowledgeStore] = None):
+    """Embed through the budget ledger when one is attached (R01).
 
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Budget":
-        return cls(
-            max_input_tokens_per_run=int(data.get("max_input_tokens_per_run",
-                                                   200_000)),
-            max_total_input_tokens=(
-                int(data["max_total_input_tokens"])
-                if data.get("max_total_input_tokens") is not None else None),
-        )
+    Without a ledger (offline/mock paths) usage is still recorded on the
+    caller's store so spend stays observable."""
+    if ledger is None:
+        vectors, usage = embedder.embed(texts)
+        if kb is not None:
+            kb.record_usage(usage.provider, usage.model, "embedding",
+                            usage.input_tokens, usage.output_tokens,
+                            usage.cost_basis)
+        return vectors, usage
+    est = sum(estimate_tokens(t) for t in texts) + 8
+    reservation = ledger.reserve("embedding", est)
+    try:
+        vectors, usage = embedder.embed(texts)
+    except Exception:
+        ledger.fail_unknown(reservation)
+        raise
+    ledger.settle(reservation, usage)
+    return vectors, usage
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -50,24 +61,25 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def ensure_block_embeddings(kb: KnowledgeStore, embedder: EmbeddingProvider,
-                            block_ids: Sequence[str]) -> int:
+                            block_ids: Sequence[str],
+                            ledger: Optional[BudgetLedger] = None) -> int:
     """Embed missing blocks (cache keyed by model). Returns newly embedded."""
     missing = [bid for bid in block_ids if kb.get_embedding(embedder.model, bid) is None]
     if not missing:
         return 0
     blocks = kb.blocks_by_ids(missing)
-    vectors, usage = embedder.embed([b["text"] for b in blocks])
+    vectors, usage = budgeted_embed(embedder, [b["text"] for b in blocks],
+                                    ledger=ledger, kb=kb)
     kb.put_embeddings(embedder.model,
                       {b["block_id"]: v for b, v in zip(blocks, vectors)})
-    kb.record_usage(usage.provider, usage.model, "embedding",
-                    usage.input_tokens, usage.output_tokens, usage.cost_basis)
     return len(blocks)
 
 
 def hybrid_search(kb: KnowledgeStore, query: str,
                   embedder: EmbeddingProvider,
                   filters: Optional[SearchFilters] = None,
-                  limit: int = 20, embed_top: int = 200
+                  limit: int = 20, embed_top: int = 200,
+                  ledger: Optional[BudgetLedger] = None
                   ) -> Dict[str, Any]:
     """Keyword + vector recall fused with RRF (P4-02)."""
     kw = keyword_search(kb, query, filters, limit=embed_top)
@@ -82,12 +94,9 @@ def hybrid_search(kb: KnowledgeStore, query: str,
                 "SELECT block_id FROM index_doc_terms WHERE generation_id=?",
                 (kw["generation_id"],)).fetchall()
         pool_ids = [r["block_id"] for r in rows][:embed_top]
-    ensure_block_embeddings(kb, embedder, pool_ids)
-    vectors, q_usage = embedder.embed([query])
+    ensure_block_embeddings(kb, embedder, pool_ids, ledger=ledger)
+    vectors, _q_usage = budgeted_embed(embedder, [query], ledger=ledger, kb=kb)
     query_vec = vectors[0]
-    kb.record_usage(q_usage.provider, q_usage.model, "embedding",
-                    q_usage.input_tokens, q_usage.output_tokens,
-                    q_usage.cost_basis)
     scored = []
     for block_id in pool_ids:
         vector = kb.get_embedding(embedder.model, block_id)
@@ -165,28 +174,21 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
                          chat: ChatProvider,
                          retriever=None, top_k: int = 8,
                          budget: Optional[Budget] = None,
-                         prompt_version: str = "pv1") -> Dict[str, Any]:
+                         prompt_version: str = "pv1",
+                         ledger: Optional[BudgetLedger] = None) -> Dict[str, Any]:
     """Run one analysis: retrieve -> prompt -> model -> verify -> persist.
 
     Failure modes (A18): provider errors mark the run failed without
     publishing a draft; retryable errors keep the run re-runnable; budget
-    breaches reject before any provider call.
+    breaches reserve-or-refuse BEFORE any provider bytes leave (R01).
     """
     budget = budget or Budget()
+    ledger = ledger or BudgetLedger(kb, budget)
     run = kb.get_analysis_run(run_id)
     if run is None:
         raise ValueError("run %r not found" % run_id)
     if run["status"] == "done":
         return {"run_id": run_id, "status": "done", "idempotent": True}
-
-    if budget.max_total_input_tokens is not None:
-        totals = kb.usage_totals()
-        if totals["input_tokens"] >= budget.max_total_input_tokens:
-            kb.update_analysis_run(run_id, status="failed",
-                                   error="budget_exceeded_total_input_tokens")
-            return {"run_id": run_id, "status": "failed",
-                    "error": "budget_exceeded_total_input_tokens",
-                    "retryable": False}
 
     kb.update_analysis_run(run_id, status="running")
     try:
@@ -198,7 +200,7 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
         blocks = [hit["block"] if isinstance(hit, dict) and "block" in hit
                   else hit.block for hit in hits]
         prompt = build_analysis_prompt(query, blocks)
-        estimated_input = len(prompt) // 4 + 1
+        estimated_input = estimate_tokens(prompt)
         if estimated_input > budget.max_input_tokens_per_run:
             kb.update_analysis_run(
                 run_id, status="failed",
@@ -206,10 +208,23 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
             return {"run_id": run_id, "status": "failed",
                     "error": "budget_exceeded_per_run_input_tokens",
                     "retryable": False}
-        draft, usage = chat.complete(prompt)
-        kb.record_usage(usage.provider, usage.model, "chat",
-                        usage.input_tokens or estimated_input,
-                        usage.output_tokens, usage.cost_basis, run_id=run_id)
+        try:
+            reservation = ledger.reserve("chat", estimated_input,
+                                         run_id=run_id)
+        except BudgetExceeded as exc:
+            code = str(exc).split(":")[0]
+            kb.update_analysis_run(run_id, status="failed", error=code)
+            return {"run_id": run_id, "status": "failed", "error": code,
+                    "retryable": False}
+        try:
+            draft, usage = chat.complete(prompt)
+        except EgressNotAllowed:
+            ledger.release(reservation)  # gate refused before bytes left
+            raise
+        except Exception:
+            ledger.fail_unknown(reservation, run_id=run_id)
+            raise
+        ledger.settle(reservation, usage, run_id=run_id)
         cited = sorted({int(m) for m in CITATION_RE.findall(draft)})
         verification = verify_citations(draft, cited, blocks)
         kb.update_analysis_run(
@@ -223,6 +238,10 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
         return {"run_id": run_id, "status": "done", "draft": draft,
                 "citations": verification["valid"],
                 "verification": verification}
+    except BudgetExceeded as exc:
+        kb.update_analysis_run(run_id, status="failed", error=str(exc))
+        return {"run_id": run_id, "status": "failed", "error": str(exc),
+                "retryable": False}
     except ProviderCallError as exc:
         kb.update_analysis_run(run_id, status="failed",
                                error="%s" % exc)

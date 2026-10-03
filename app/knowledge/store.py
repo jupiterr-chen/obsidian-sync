@@ -191,7 +191,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     provider TEXT NOT NULL,
     model TEXT NOT NULL,
-    kind TEXT NOT NULL,               -- embedding | chat
+    kind TEXT NOT NULL,               -- embedding | chat | vision
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     cost_basis TEXT NOT NULL DEFAULT 'unknown',
@@ -199,6 +199,15 @@ CREATE TABLE IF NOT EXISTS usage_events (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
+CREATE TABLE IF NOT EXISTS budget_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    est_input INTEGER NOT NULL,
+    status TEXT NOT NULL,             -- reserved | settled | unknown | released
+    run_id TEXT,
+    created_at TEXT NOT NULL,
+    settled_at TEXT
+);
 CREATE TABLE IF NOT EXISTS claims (
     claim_id TEXT PRIMARY KEY,
     current_revision INTEGER NOT NULL,

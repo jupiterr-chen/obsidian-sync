@@ -10,6 +10,7 @@ plus a filled provider config; until then it refuses loudly.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
@@ -111,13 +112,20 @@ class LocalRapidOcr(OcrEngine):
 
 
 class VisionApiOcr(OcrEngine):
-    """Page-image OCR via a configured multimodal chat provider."""
+    """Page-image OCR via a configured multimodal chat provider.
+
+    Every page is budget-gated when a ledger is attached (R01): reserve a
+    conservative per-page token estimate, settle with the provider-side
+    usage, and charge the estimate on transport failure (never zero)."""
 
     name = "vision-api"
 
-    def __init__(self, chat_provider=None, provider_spec: Optional[Dict] = None):
+    def __init__(self, chat_provider=None, provider_spec: Optional[Dict] = None,
+                 ledger=None, page_token_cap: int = 20000):
         self.chat_provider = chat_provider
         self.provider_spec = provider_spec or {}
+        self.ledger = ledger
+        self.page_token_cap = int(page_token_cap)
 
     def available(self) -> bool:
         return self.chat_provider is not None
@@ -128,19 +136,46 @@ class VisionApiOcr(OcrEngine):
                 "vision OCR requested but no multimodal provider is "
                 "configured (fill providers.vision_ocr and set "
                 "egress_allowed=true)")
+        reservation = None
+        if self.ledger is not None:
+            from .budget import BudgetExceeded, BudgetLedger  # noqa: F401
+
+            ceiling = self.ledger.budget.max_input_tokens_per_page
+            if self.page_token_cap > ceiling:
+                raise OcrEngineError(
+                    "budget_exceeded_per_page: page estimate %d > cap %d"
+                    % (self.page_token_cap, ceiling))
+            try:
+                reservation = self.ledger.reserve(
+                    "vision-page", self.page_token_cap, counts_as_page=True)
+            except BudgetExceeded as exc:
+                raise OcrEngineError(str(exc))
         prompt = ("Transcribe ALL text in this document page image. Keep the "
                   "original language (Chinese/English mixed as-is). Output "
                   "plain text only, no commentary.")
-        text, usage = self.chat_provider.complete_with_image(
-            prompt, image_bytes, mime="image/png", max_output_tokens=4000)
+        try:
+            text, usage = self.chat_provider.complete_with_image(
+                prompt, image_bytes, mime="image/png", max_output_tokens=4000)
+        except Exception:
+            if reservation is not None:
+                from .providers import EgressNotAllowed
+
+                if isinstance(sys.exc_info()[1], EgressNotAllowed):
+                    self.ledger.release(reservation)  # no bytes left the box
+                else:
+                    self.ledger.fail_unknown(reservation)
+            raise
+        if reservation is not None:
+            self.ledger.settle(reservation, usage)
         # vision confidence is unknown -> conservative 0.5 so low-confidence
-        # flagging stays honest (output tokens reveal cost in the ledger)
+        # flagging stays honest (usage lands in the ledger above)
         return text, 0.5
 
 
 def build_ocr_engine(ocr_config: Optional[OcrConfig],
                      providers: Optional[Dict[str, Any]] = None,
-                     provider_specs: Optional[Dict[str, Any]] = None
+                     provider_specs: Optional[Dict[str, Any]] = None,
+                     ledger=None,
                      ) -> Optional[OcrEngine]:
     """Resolve the configured OCR route; None means OCR off/unavailable."""
     config = ocr_config or OcrConfig()
@@ -155,7 +190,10 @@ def build_ocr_engine(ocr_config: Optional[OcrConfig],
                 "ocr.engine=vision-api but providers.vision_ocr is not "
                 "filled in; refusing to guess an endpoint")
         return VisionApiOcr(chat_provider=providers.get("vision_ocr"),
-                            provider_spec=spec)
+                            provider_spec=spec, ledger=ledger,
+                            page_token_cap=(config.max_input_tokens_per_page
+                                            if hasattr(config, "max_input_tokens_per_page")
+                                            else 20000))
     # default: local
     engine = LocalRapidOcr(languages=config.languages,
                            min_confidence=config.min_confidence)
@@ -166,7 +204,8 @@ def build_ocr_engine(ocr_config: Optional[OcrConfig],
 
 def build_fallback_engine(ocr_config: Optional[OcrConfig],
                           providers: Optional[Dict[str, Any]] = None,
-                          provider_specs: Optional[Dict[str, Any]] = None
+                          provider_specs: Optional[Dict[str, Any]] = None,
+                          ledger=None,
                           ) -> Optional[OcrEngine]:
     """Low-confidence page fallback (ocr.fallback). None when not configured.
 
@@ -184,7 +223,11 @@ def build_fallback_engine(ocr_config: Optional[OcrConfig],
     provider = providers.get("vision_ocr")
     if provider is None:
         return None
-    return VisionApiOcr(chat_provider=provider, provider_spec=spec)
+    return VisionApiOcr(chat_provider=provider, provider_spec=spec,
+                        ledger=ledger,
+                        page_token_cap=(config.max_input_tokens_per_page
+                                        if hasattr(config, "max_input_tokens_per_page")
+                                        else 20000))
 
 
 def render_page_to_png(raw_pdf: bytes, page_number: int,

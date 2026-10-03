@@ -182,7 +182,12 @@ class AnalysisRunTest(unittest.TestCase):
         self.assertTrue(outcome["retryable"])
         run = self.kb.get_analysis_run(created["run_id"])
         self.assertIsNone(run["draft"])  # no draft published on failure
-        self.assertEqual(self.kb.usage_for_run(created["run_id"]), [])
+        # R01: a dispatched-but-failed attempt is charged conservatively,
+        # never recorded as zero cost
+        usage = self.kb.usage_for_run(created["run_id"])
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]["cost_basis"], "unknown:estimate-charged")
+        self.assertGreater(usage[0]["input_tokens"], 0)
 
     def test_budget_gates_reject_before_provider_calls(self):
         chat = ScriptedChat()

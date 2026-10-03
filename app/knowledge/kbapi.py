@@ -58,12 +58,24 @@ class KbApi:
 
     def __init__(self, kb: KnowledgeStore, tokens: Dict[str, List[str]],
                  embedder: Any = None, chat: Any = None,
-                 budget: Any = None):
+                 budget: Any = None, vision: Any = None):
+        from .budget import Budget, BudgetLedger
+
         self.kb = kb
         self.tokens = tokens
         self.embedder = embedder
         self.chat = chat
-        self.budget = budget
+        self.vision = vision
+        self.budget = budget if budget is not None else Budget()
+        self.ledger = BudgetLedger(kb, self.budget)
+
+    def attach_providers(self, chat: Any = None, embedder: Any = None,
+                         vision: Any = None) -> None:
+        """Explicit role binding (R03): a vision model never impersonates
+        the chat role, and analysis stays disabled without a real chat."""
+        self.chat = chat
+        self.embedder = embedder
+        self.vision = vision
 
     def authenticate(self, bearer: Optional[str], permission: str) -> str:
         if not bearer:
@@ -134,8 +146,12 @@ class KbApi:
             from .analysis import hybrid_search
 
             result = hybrid_search(self.kb, query, self.embedder, filters,
-                                   limit=limit + 1)
+                                   limit=limit + 1, ledger=self.ledger)
             if not result.get("ok"):
+                if str(result.get("error", "")).startswith("budget"):
+                    raise KbApiError(429, "budget_exceeded",
+                                     result.get("error", "budget exceeded"),
+                                     retryable=True)
                 raise KbApiError(503, "not_ready", result.get("error", "not ready"))
             hits = [SimpleNamespace(block=h["block"], score=h["score"],
                                     score_kind=h["score_kind"],
@@ -308,14 +324,15 @@ class KbApi:
                 if mode == "hybrid":
                     from .analysis import hybrid_search
 
-                    result = hybrid_search(self.kb, q, self.embedder, None, limit=k)
+                    result = hybrid_search(self.kb, q, self.embedder, None,
+                                           limit=k, ledger=self.ledger)
                     return result.get("hits", [])
                 result = search(self.kb, q, None, limit=k)
                 return result.get("hits", [])
 
             outcome = execute_analysis_run(
                 self.kb, created["run_id"], query, self.chat,
-                retriever=retriever, budget=self.budget)
+                retriever=retriever, budget=self.budget, ledger=self.ledger)
             if outcome.get("status") == "failed":
                 raise KbApiError(422, "analysis_failed",
                                  outcome.get("error", "analysis failed"),
@@ -551,8 +568,9 @@ class Handler(BaseHTTPRequestHandler):
 def build_kb_server(kb: KnowledgeStore, tokens: Dict[str, List[str]],
                     host: str = "127.0.0.1", port: int = 8766,
                     embedder: Any = None, chat: Any = None,
-                    budget: Any = None) -> ThreadingHTTPServer:
-    api = KbApi(kb, tokens, embedder=embedder, chat=chat, budget=budget)
+                    budget: Any = None, vision: Any = None) -> ThreadingHTTPServer:
+    api = KbApi(kb, tokens, embedder=embedder, chat=chat, budget=budget,
+                vision=vision)
     handler = type("BoundKbHandler", (Handler,), {"api": api})
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
