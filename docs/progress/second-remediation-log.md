@@ -42,3 +42,17 @@
 - A06-A22 真实门禁（盲测样本/50 查询基准/7 天窗口/真实 RTO/真实 provider 质量）。
 - 生产切换（CUTOVER 演练需用户明确授权；本轮仅隔离目录验证）。
 - 服务器 v3 OCR 回填产物为修复前身份；采用本轮修复逻辑需第四轮重提取（十几小时级，待授权）。
+
+## SR6 独立复验：评审探针场景重放（2026-10-03）
+
+评审探针 `re-review-probe-20261003.py` 按缺陷行为写、无异常保护——在修复后代码上，page_cap 场景于第 2 次 reserve 即抛 `BudgetExceeded`（正是修复目标行为），属预期中断而非回归。以带异常保护的等价重放逐场景断言修复后行为（历史探针与 JSON 不修改）：
+
+| 探针场景 | 修复后实测 | 判定 |
+|---|---|---|
+| budget_atomicity（cap10、两次 6） | 第一个接受、第二个 **rejected** | ✅（原：双双接受=12） |
+| page_cap（cap1、3 页、含 unknown 结算） | 接受 1、拒绝 2（unknown 计页） | ✅（原：接受 3、pages=0） |
+| settlement_crash（结算前中断） | 剩余额度 6（预留未消失）；双次 settle 后 usage 恰 1 行 | ✅（原：额度复活=10、usage 0 行） |
+| writeback_race（检查后窗口写人工） | outcome=preserved_with_candidate，主文件保留 HUMAN | ✅（原：written、人工丢失） |
+| public_asof（6/30 报告期、8/20 发布、7/1 截止） | **0 命中** | ✅（原：1 命中=未来信息泄漏） |
+
+输出尾部 `ALL-PROBE-SCENARIOS-FIXED`。其余场景（image_duplicate_ocr、snapshot_read_race、cursor_metadata、independent_semantic_recall、library_effective_command）由 `test_second_review*.py` 19 项回归覆盖，全部 GREEN。
