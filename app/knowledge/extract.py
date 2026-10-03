@@ -11,6 +11,7 @@ a usable mapping are flagged, never guessed.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import zlib
 from dataclasses import dataclass, field
@@ -28,19 +29,82 @@ from .quality import (
 )
 
 # Versioned extraction configuration; changes must produce a new digest.
-# v2: optional OCR engine integration (PDF per-page + images).
-EXTRACT_CONFIG = {"normalization": 3, "blocks": "evidence-block-v1",
-                  "ocr": "fallback-engine-v1"}
+# v4 (R02): the digest covers the EFFECTIVE processing configuration - OCR
+# engine/dpi/languages/thresholds/fallback, vision model NAME (never the key),
+# quality policy version and processing-library versions - so any behavioral
+# change yields a new task identity and identical configs rerun for free.
+EXTRACT_CONFIG = {"normalization": 4, "blocks": "evidence-block-v1",
+                  "ocr": "effective-config-v1"}
 
 STAGE_EXTRACT = "extract"
 
 
-def extract_config_digest() -> str:
-    import json
+def _dep_version(name: str) -> Optional[str]:
+    try:
+        import importlib.metadata as metadata
 
-    canonical = json.dumps(EXTRACT_CONFIG, ensure_ascii=False, sort_keys=True,
-                           separators=(",", ":"))
+        return metadata.version(name)
+    except Exception:
+        return None
+
+
+def effective_extract_config(ocr_config=None,
+                             provider_specs: Optional[Dict[str, Any]] = None
+                             ) -> Dict[str, Any]:
+    """The full behavior-determining configuration, secrets excluded."""
+    from .ocr import OcrConfig
+    from .quality import QUALITY_CONFIG
+
+    cfg = ocr_config or OcrConfig()
+    specs = provider_specs or {}
+    vision_used = cfg.engine == "vision-api" or cfg.fallback == "vision-api"
+    return {
+        "extract": EXTRACT_CONFIG,
+        "quality": QUALITY_CONFIG,
+        "ocr": {
+            "engine": cfg.engine,
+            "fallback": cfg.fallback,
+            "render_dpi": cfg.render_dpi,
+            "languages": sorted(cfg.languages or []),
+            "min_confidence": cfg.min_confidence,
+            "fallback_min_confidence": cfg.fallback_min_confidence,
+            "max_pages_per_doc": cfg.max_pages_per_doc,
+            "vision_model": ((specs.get("vision_ocr") or {}).get("model")
+                             if vision_used else None),
+        },
+        "deps": {
+            "pypdfium2": _dep_version("pypdfium2"),
+            "rapidocr_onnxruntime": _dep_version("rapidocr-onnxruntime"),
+        },
+    }
+
+
+def extract_config_digest(ocr_config=None,
+                          provider_specs: Optional[Dict[str, Any]] = None
+                          ) -> str:
+    canonical = json.dumps(
+        effective_extract_config(ocr_config, provider_specs),
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def extractor_info(fmt: str):
+    """(parser_id, parser_version) that WOULD run for a format, without
+    executing anything - enables the R02 zero-cost identity pre-check."""
+    try:
+        import pypdfium2  # noqa: F401
+
+        if fmt == "pdf":
+            return "pypdfium2", (_dep_version("pypdfium2") or "unknown")
+    except ImportError:
+        pass
+    ids = {"pdf": ("stdlib-pdf-degraded", "1"),
+           "html": ("stdlib-html", "1"),
+           "txt": ("stdlib-txt", "1"),
+           "img": ("stdlib-image", "1")}
+    if fmt not in ids:
+        raise ExtractorMissing("no extractor registered for format %r" % fmt)
+    return ids[fmt]
 
 
 def compute_extraction_id(source: str, doc_id: str, version_id: str,
@@ -131,27 +195,43 @@ _TABLE_CELLS = {"td", "th"}
 
 
 class _DomBlock:
-    __slots__ = ("block_type", "text", "dom_path", "start_char")
+    __slots__ = ("block_type", "text", "dom_path", "start_char", "end_char")
 
-    def __init__(self, block_type: str, text: str, dom_path: str, start_char: int):
+    def __init__(self, block_type: str, text: str, dom_path: str,
+                 start_char: int, end_char: int):
         self.block_type = block_type
         self.text = text
         self.dom_path = dom_path
         self.start_char = start_char
+        self.end_char = end_char
+
+
+_BLOCK_SEPARATOR = "\n"
+
+
+def _norm_ws(text: str) -> str:
+    return re.sub(r"\s+", " ", text)
 
 
 class _HtmlTreeParser(HTMLParser):
-    """Collects block-level text with DOM paths and a normalized text stream."""
+    """Block text with DOM paths, tracked against a normalized stream.
+
+    R06: every emitted block records the exact span it occupies in the
+    normalized stream (whitespace collapsed at flush time, blocks joined by
+    single newlines), so duplicate paragraphs locate to their OWN
+    occurrences instead of the first find() hit.
+    """
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.path: List[Tuple[str, int]] = []          # (tag, nth-of-type)
         self.counters: List[Dict[str, int]] = []
         self.skip_depth = 0
-        self.normalized: List[str] = []                # text pieces
+        self.normalized: List[str] = []                # stream segments
         self.length = 0
         self.blocks: List[_DomBlock] = []
         self._current: Optional[_DomBlock] = None
+        self._current_raw: List[str] = []
         self.table_stack: List[Dict[str, Any]] = []
         self.in_caption = False
 
@@ -174,24 +254,41 @@ class _HtmlTreeParser(HTMLParser):
         if self.path:
             self.path.pop()
 
+    # stream helpers ----------------------------------------------------
+    def _emit(self, text: str) -> None:
+        if text:
+            self.normalized.append(text)
+            self.length += len(text)
+
+    def _emit_separator(self) -> None:
+        self.normalized.append(_BLOCK_SEPARATOR)
+        self.length += len(_BLOCK_SEPARATOR)
+
     # text handling ----------------------------------------------------
     def _flush_block(self) -> None:
-        if self._current is not None and self._current.text.strip():
-            self.blocks.append(self._current)
+        if self._current is not None:
+            text = _norm_ws("".join(self._current_raw)).strip()
+            if text:
+                start = self.length
+                self._emit(text)
+                self._current.text = text
+                self._current.end_char = self.length
+                self.blocks.append(self._current)
+                self._emit_separator()
         self._current = None
+        self._current_raw = []
 
     def _start_block(self, block_type: str) -> None:
         self._flush_block()
-        self._current = _DomBlock(block_type, "", self._dom_path(), self.length)
+        self._current = _DomBlock(block_type, "", self._dom_path(),
+                                  self.length, self.length)
 
     def _append_text(self, data: str) -> None:
         if not data:
             return
         if self._current is None:
             self._start_block("paragraph")
-        self._current.text += data
-        self.normalized.append(data)
-        self.length += len(data)
+        self._current_raw.append(data)
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -229,7 +326,8 @@ class _HtmlTreeParser(HTMLParser):
             return
         if tag in _TABLE_CELLS and self.table_stack:
             if self._current is not None:
-                self.table_stack[-1]["row"].append(self._current.text.strip())
+                self.table_stack[-1]["row"].append(
+                    _norm_ws("".join(self._current_raw)).strip())
             self._flush_block()
         elif tag == "tr" and self.table_stack:
             table = self.table_stack[-1]
@@ -239,11 +337,16 @@ class _HtmlTreeParser(HTMLParser):
         elif tag == "table" and self.table_stack:
             table = self.table_stack.pop()
             if table["rows"]:
-                projection = _table_projection(table["rows"])
-                self.blocks.append(_DomBlock(
-                    "table", projection, table["path"], self.length))
-                self.normalized.append(projection)
-                self.length += len(projection)
+                projection = _norm_ws(_table_projection(table["rows"])).strip()
+                if projection:
+                    dom_block = _DomBlock("table", projection, table["path"],
+                                          self.length, self.length)
+                    self._emit_separator()
+                    dom_block.start_char = self.length
+                    self._emit(projection)
+                    dom_block.end_char = self.length
+                    self.blocks.append(dom_block)
+                    self._emit_separator()
         elif tag == "caption":
             self.in_caption = False
             self._flush_block()
@@ -303,23 +406,22 @@ def _finalize_blocks(result: ExtractionResult, parser: _HtmlTreeParser,
     full_text = "".join(parser.normalized)
     quality = analyze_text(full_text)
     for dom_block in parser.blocks:
-        text = re.sub(r"\s+", " ", dom_block.text).strip()
-        if not text:
+        if not dom_block.text:
             continue
-        start = full_text.find(dom_block.text[:60]) if dom_block.text else -1
-        if start < 0:
-            start = min(dom_block.start_char, max(0, len(full_text) - 1))
-        end = min(start + len(dom_block.text), len(full_text))
+        # spans were tracked at parse time (R06): the block text IS the
+        # stream slice [start_char, end_char)
         result.blocks.append(Block(
-            block_type=dom_block.block_type, text=text,
+            block_type=dom_block.block_type, text=dom_block.text,
             locator={"kind": "html", "dom_path": dom_block.dom_path,
-                     "start_char": start, "end_char": end},
+                     "start_char": dom_block.start_char,
+                     "end_char": dom_block.end_char},
         ))
     result.status = merge_statuses(result.status, quality.status)
     result.issues = sorted(set(result.issues) | set(quality.issues))
     result.stats.update({
         "encoding": encoding, "chars": len(full_text),
-        "blocks": len(result.blocks), "tables": len(parser.table_stack) + sum(
+        "normalized_chars": len(full_text),
+        "blocks": len(result.blocks), "tables": sum(
             1 for b in parser.blocks if b.block_type == "table"),
     })
 
@@ -461,46 +563,147 @@ def _pdf_content_text(content: bytes) -> Tuple[List[str], bool]:
     return pieces, cid_suspect
 
 
+_PAGES_DICT_RE = re.compile(rb"/Type\s*/Pages(?![a-zA-Z])")
+_KIDS_RE = re.compile(rb"/Kids\s*\[(.*?)\]", re.S)
+_CONTENTS_ARRAY_RE = re.compile(rb"/Contents\s*\[(.*?)\]", re.S)
+
+
+def _pdfium_page_texts(raw: bytes) -> Optional[List[str]]:
+    """Per-page text via pypdfium2 (real page tree, font/CMap handling)."""
+    try:
+        import pypdfium2 as pdfium
+    except ImportError:
+        return None
+    document = pdfium.PdfDocument(raw)
+    try:
+        texts = []
+        for index in range(len(document)):
+            page = document[index]
+            textpage = page.get_textpage()
+            texts.append(textpage.get_text_range() or "")
+        return texts
+    finally:
+        document.close()
+
+
+def _stdlib_pdf_pages(raw: bytes) -> List[Tuple[int, Optional[bytes]]]:
+    """(page_object, content_bytes|None) in PAGE-TREE order (R05).
+
+    Order follows /Pages /Kids recursively; object-number order is only a
+    flagged fallback when no tree is parseable. A page without decodable
+    content yields None so the caller records a missing-content issue."""
+    objects = _parse_objects(raw)
+    page_objs = [n for n in sorted(objects)
+                 if _PAGE_DICT_RE.search(objects[n])]
+    if not page_objs:
+        return []
+    kids_map: Dict[int, List[int]] = {}
+    for num, body in objects.items():
+        if _PAGES_DICT_RE.search(body):
+            match = _KIDS_RE.search(body)
+            if match:
+                kids_map[num] = [int(x) for x in
+                                 re.findall(rb"(\d+)\s+0\s+R", match.group(1))]
+    ordered: List[int] = []
+    if kids_map:
+        all_kids = {k for values in kids_map.values() for k in values}
+        roots = [n for n in kids_map if n not in all_kids] or \
+            [min(kids_map)]
+
+        def walk(node: int) -> None:
+            for kid in kids_map.get(node, []):
+                body = objects.get(kid)
+                if body is None:
+                    continue
+                if _PAGES_DICT_RE.search(body):
+                    walk(kid)
+                elif _PAGE_DICT_RE.search(body):
+                    ordered.append(kid)
+
+        for root in roots:
+            walk(root)
+    if not ordered:
+        ordered = sorted(page_objs)  # fallback; caller flags degraded order
+    pages: List[Tuple[int, Optional[bytes]]] = []
+    for num in ordered:
+        body = objects[num]
+        stream_nums: List[int] = []
+        single = _CONTENTS_RE.search(body)
+        array = _CONTENTS_ARRAY_RE.search(body)
+        if array:
+            stream_nums = [int(x) for x in
+                           re.findall(rb"(\d+)\s+0\s+R", array.group(1))]
+        elif single:
+            stream_nums = [int(single.group(1))]
+        data = b""
+        for stream_num in stream_nums:
+            decoded = _decode_stream(objects.get(stream_num, b""))
+            if decoded is None:
+                data = b""
+                break
+            data += decoded
+        pages.append((num, data if stream_nums else None))
+    return pages
+
+
 def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                 fallback_ocr=None) -> ExtractionResult:
     issues: List[str] = []
-    objects = _parse_objects(raw)
-    page_nums: List[int] = []
-    for obj_num in sorted(objects):
-        if _PAGE_DICT_RE.search(objects[obj_num]):
-            page_nums.append(obj_num)
-    if not page_nums:
-        return ExtractionResult(
-            parser_id="stdlib-pdf", parser_version="1", status=STATUS_FAILED,
-            issues=["no_page_objects_found"], stats={"pages": None},
-        )
+    parser_id, parser_version = extractor_info("pdf")
+    page_texts: List[Optional[str]] = []
+    if parser_id == "pypdfium2":
+        try:
+            page_texts = list(_pdfium_page_texts(raw) or [])
+        except Exception as exc:  # pdfium parse failure -> degraded stdlib
+            issues.append("degraded_pdf_engine:pdfium-load-failed:%s"
+                          % type(exc).__name__)
+            parser_id, parser_version = "stdlib-pdf-degraded", "1"
+            page_texts = []
+    if parser_id == "pypdfium2":
+        if not page_texts:
+            return ExtractionResult(
+                parser_id=parser_id, parser_version=parser_version,
+                status=STATUS_FAILED, issues=["no_page_objects_found"],
+                stats={"pages": None})
+        cid_suspect_any = False
+        engine_kind = "page-tree"
+    else:
+        issues.append("degraded_pdf_engine:pypdfium2-missing")
+        ordered = _stdlib_pdf_pages(raw)
+        if not ordered:
+            return ExtractionResult(
+                parser_id=parser_id, parser_version=parser_version,
+                status=STATUS_FAILED, issues=issues + ["no_page_objects_found"],
+                stats={"pages": None})
+        cid_suspect_any = False
+        page_texts = []
+        for _num, data in ordered:
+            if data is None:
+                page_texts.append(None)
+                continue
+            pieces, cid_suspect = _pdf_content_text(data)
+            cid_suspect_any = cid_suspect_any or cid_suspect
+            page_texts.append("\n".join(p for p in pieces if p.strip()))
+        engine_kind = "stdlib-simplified"
 
     blocks: List[Block] = []
     per_page_chars: List[int] = []
-    cid_suspect_any = False
     ocr_candidates = 0
     ocr_applied = 0
+    unmet_ocr_pages = 0
+    missing_content_pages = 0
     max_ocr_pages = getattr(ocr_config, "max_pages_per_doc", 200)
     render_dpi = getattr(ocr_config, "render_dpi", 200)
-    for page_index, page_num in enumerate(page_nums, start=1):
-        body = objects[page_num]
-        contents_match = _CONTENTS_RE.search(body)
-        page_text_parts: List[str] = []
-        if contents_match:
-            stream_num = int(contents_match.group(1))
-            stream_body = objects.get(stream_num, b"")
-            decoded = _decode_stream(stream_body)
-            if decoded is None:
-                issues.append("page_%d_content_undecodable" % page_index)
-            else:
-                pieces, cid_suspect = _pdf_content_text(decoded)
-                cid_suspect_any = cid_suspect_any or cid_suspect
-                page_text_parts = pieces
-        page_text = "\n".join(part for part in page_text_parts if part.strip())
+    for page_index, page_text in enumerate(page_texts, start=1):
+        if page_text is None:
+            issues.append("page_%d_missing_content" % page_index)
+            missing_content_pages += 1
+            page_text = ""
         wants_ocr, ocr_reasons = route_page_to_ocr(len(page_text), page_text)
         if wants_ocr:
             ocr_candidates += 1
-            issues.append("page_%d_needs_ocr:%s" % (page_index, "+".join(ocr_reasons)))
+            issues.append("page_%d_needs_ocr:%s"
+                          % (page_index, "+".join(ocr_reasons)))
             if ocr is not None and ocr_applied < max_ocr_pages:
                 from .ocr import OcrEngineError, render_page_to_png
 
@@ -509,7 +712,8 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                     png = render(raw, page_index, dpi=render_dpi)
                     ocr_text, confidence = ocr.run(png)
                     engine_label = getattr(ocr, "name", "ocr")
-                    threshold = getattr(ocr_config, "fallback_min_confidence", 0.0)
+                    threshold = getattr(ocr_config, "fallback_min_confidence",
+                                        0.0)
                     if ((not ocr_text.strip() or confidence < threshold)
                             and fallback_ocr is not None):
                         try:
@@ -537,33 +741,43 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                 except Exception as exc:  # renderer/engine errors never abort
                     issues.append("page_%d_ocr_failed:%s" % (
                         page_index, type(exc).__name__))
+            elif ocr is None or ocr_applied >= max_ocr_pages:
+                unmet_ocr_pages += 1
         if page_text.strip():
             blocks.append(Block(
                 block_type="paragraph", text=page_text,
                 locator={"kind": "pdf", "page": page_index},
             ))
+        per_page_chars.append(len(page_text))
 
     full_text = "\n".join(block.text for block in blocks)
     quality = analyze_text(full_text, per_page_chars)
     merged_issues = sorted(set(issues) | set(quality.issues))
     if cid_suspect_any:
         merged_issues.append("cid_font_unsupported")
+    # R05: unhandled OCR candidates / missing content / OCR failures must
+    # degrade the document below ready - remaining text volume is not proof.
+    page_problems = (unmet_ocr_pages > 0 or missing_content_pages > 0
+                     or any("ocr_failed" in i for i in merged_issues))
     status = merge_statuses(quality.status,
+                            STATUS_REVIEW if page_problems else STATUS_READY,
                             STATUS_REVIEW if cid_suspect_any else STATUS_READY)
     if not full_text.strip() and not any("needs_ocr" in i for i in merged_issues):
         status = STATUS_FAILED
         merged_issues.append("no_text_layer")
     return ExtractionResult(
-        parser_id="stdlib-pdf", parser_version="1",
+        parser_id=parser_id, parser_version=parser_version,
         status=status, issues=merged_issues, blocks=blocks,
         stats={
-            "pages": len(page_nums),
+            "pages": len(page_texts),
             "chars": len(full_text),
             "chars_per_page": per_page_chars,
             "ocr_candidate_pages": ocr_candidates,
             "ocr_applied_pages": ocr_applied,
+            "unmet_ocr_pages": unmet_ocr_pages,
+            "missing_content_pages": missing_content_pages,
             "ocr_engine": getattr(ocr, "name", None) if ocr else None,
-            "objects_parsed": len(objects),
+            "pdf_engine": engine_kind,
         },
     )
 

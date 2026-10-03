@@ -21,6 +21,7 @@ from .extract import (
     STAGE_EXTRACT,
     compute_extraction_id,
     extract_config_digest,
+    extractor_info,
     get_extractor,
 )
 from .extract import ExtractorMissing
@@ -37,7 +38,13 @@ class JobRunner:
         self.library_config = library_config
         self.blobs = blobs or SnapshotStore(config.snapshot_root)
         self.stage_digest = config_digest(STAGE_CONFIG)
-        self.extract_digest = extract_config_digest()
+        self.extract_digest = self._current_extract_digest()
+
+    def _current_extract_digest(self) -> str:
+        """R02: effective-config digest (OCR settings, models, deps)."""
+        return extract_config_digest(
+            self.config.ocr_config(),
+            self.config.extra.get("providers") or {})
 
     def lock_path(self) -> str:
         return os.path.join(os.path.dirname(self.config.knowledge_db) or ".", "knowledge.lock")
@@ -95,7 +102,15 @@ class JobRunner:
             raise SnapshotError("version row missing in knowledge store")
         existing = self.kb.get_snapshot(job["source"], job["doc_id"], job["version_id"])
         if existing:
-            # Already bound; idempotent no-op (still ensure the extract job exists).
+            # Already bound: R04 requires re-verification of the stored bytes
+            # before blessing the binding again (fail closed on corruption).
+            if not self.blobs.verify_blob(existing["store_path"],
+                                          existing["sha256"],
+                                          existing["bytes"]):
+                self.kb.mark_snapshot_state(job["source"], job["doc_id"],
+                                            job["version_id"], "corrupted")
+                raise SnapshotError(
+                    "snapshot corrupted: stored bytes fail identity check")
             self._ensure_extract_job(job["source"], job["doc_id"], job["version_id"])
             return existing["sha256"]
         version = Version(
@@ -176,11 +191,49 @@ class JobRunner:
         snap = self.kb.get_snapshot(job["source"], job["doc_id"], job["version_id"])
         if snap is None:
             raise SnapshotError("snapshot missing; snapshot stage must complete first")
-        blob_path = os.path.join(self.blobs.root, *snap["store_path"].split("/"))
+        if snap.get("state") == "corrupted":
+            raise SnapshotError("snapshot marked corrupted; refusing to extract")
         fmt = format_of(version_row["media_type"], version_row["ext"])
+
+        # R02: identity is precomputable - skip expensive extraction entirely
+        # when this exact (config, parser) product already exists. A PDF that
+        # pdfium cannot parse degrades to the stdlib parser, so both possible
+        # identities are checked before doing any work.
+        parser_id, parser_version = extractor_info(fmt)
+        candidate_ids = {compute_extraction_id(
+            job["source"], job["doc_id"], job["version_id"], snap["sha256"],
+            parser_id, parser_version, self.extract_digest)}
+        if fmt == "pdf" and parser_id == "pypdfium2":
+            candidate_ids.add(compute_extraction_id(
+                job["source"], job["doc_id"], job["version_id"],
+                snap["sha256"], "stdlib-pdf-degraded", "1",
+                self.extract_digest))
+        existing = self.kb.has_any_extraction(candidate_ids)
+        if existing is not None:
+            return existing  # zero-cost immutable no-op
+
+        # R04: verify the bytes we are about to extract against the recorded
+        # identity - ingestion-time verification is not a permanent disk
+        # integrity proof.
+        blob_path = os.path.join(self.blobs.root, *snap["store_path"].split("/"))
+        try:
+            with open(blob_path, "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            self.kb.mark_snapshot_state(job["source"], job["doc_id"],
+                                        job["version_id"], "corrupted")
+            raise SnapshotError("snapshot blob unreadable: %s" % exc)
+        import hashlib
+
+        actual_sha = hashlib.sha256(raw).hexdigest()
+        if actual_sha != snap["sha256"] or len(raw) != (snap["bytes"] or -1):
+            self.kb.mark_snapshot_state(job["source"], job["doc_id"],
+                                        job["version_id"], "corrupted")
+            raise SnapshotError(
+                "snapshot corrupted: bytes on disk no longer match the "
+                "recorded identity (sha/size mismatch)")
+
         extractor = get_extractor(fmt)  # ExtractorMissing -> permanent fail
-        with open(blob_path, "rb") as handle:
-            raw = handle.read()
         ocr_engine = self.ocr_engine()
         result = extractor(raw, ocr=ocr_engine,
                            ocr_config=self.config.ocr_config(),

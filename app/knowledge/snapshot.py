@@ -63,25 +63,6 @@ class SnapshotStore:
             return False
         return True
 
-    def verify_blob(self, sha256: str, expected_bytes: Optional[int]) -> Optional[bool]:
-        """Like :meth:`blob_state` but also hashes the stored bytes.
-
-        Used before binding an existing blob to another version: existence
-        plus size is not proof, the content itself must still hash to the
-        identity recorded for the store path.
-        """
-        state = self.blob_state(sha256, expected_bytes)
-        if state is not True:
-            return state
-        digest = hashlib.sha256()
-        with open(self.blob_abs_path(sha256), "rb") as handle:
-            while True:
-                block = handle.read(CHUNK)
-                if not block:
-                    break
-                digest.update(block)
-        return digest.hexdigest() == sha256
-
     def cleanup_tmp(self, max_age_seconds: float = 3600.0) -> int:
         """Remove leftover temp files from interrupted runs (own tmp dir only)."""
         tmp_dir = os.path.join(self.root, "tmp")
@@ -144,7 +125,13 @@ class SnapshotStore:
             raise IntegrityError("temp snapshot failed re-verification")
 
     def promote(self, temp_path: str, sha256: str, size: int) -> str:
-        """Atomically move a verified temp file to its content-addressed path."""
+        """Atomically place a verified temp file at its content-addressed path.
+
+        R04: placement uses hard-link creation, which fails atomically when
+        another writer already created the blob - os.replace would silently
+        clobber a concurrent/differing file. The existing blob is never
+        modified either way.
+        """
         final = self.blob_abs_path(sha256)
         os.makedirs(os.path.dirname(final), exist_ok=True)
         if os.path.exists(final):
@@ -162,15 +149,48 @@ class SnapshotStore:
                 pass
             return final
         try:
-            os.rename(temp_path, final)
-        except FileExistsError:  # pragma: no cover - Windows rename race
+            os.link(temp_path, final)  # atomic create; fails if final exists
+        except FileExistsError:
             if os.path.getsize(final) != size:
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
                 raise IntegrityError("existing blob %s has unexpected size" % sha256)
             try:
                 os.unlink(temp_path)
             except OSError:
                 pass
+            return final
+        except OSError:
+            # filesystems without hard links: guarded rename fallback
+            os.rename(temp_path, final)
+        finally:
+            try:
+                os.unlink(temp_path)  # no-op when already moved/removed
+            except OSError:
+                pass
         return final
+
+    def verify_blob(self, store_path: str, expected_sha256: str,
+                    expected_bytes: int) -> Optional[bool]:
+        """Hash the stored bytes against the recorded identity.
+
+        None when the blob is absent, False on any mismatch, True on match.
+        """
+        path = os.path.join(self.root, *store_path.split("/"))
+        if not os.path.isfile(path):
+            return None
+        if os.path.getsize(path) != expected_bytes:
+            return False
+        digest = hashlib.sha256()
+        with open(path, "rb") as handle:
+            while True:
+                block = handle.read(CHUNK)
+                if not block:
+                    break
+                digest.update(block)
+        return digest.hexdigest() == expected_sha256
 
 
 def snapshot_version(store: KnowledgeStore, blobs: SnapshotStore,
@@ -191,7 +211,8 @@ def snapshot_version(store: KnowledgeStore, blobs: SnapshotStore,
                 "source size %d != catalog bytes %s" % (copied_bytes, expected_bytes))
         if expected_sha256 and computed_sha != expected_sha256:
             raise SourceConflict("source hash mismatch for version identity")
-        state = blobs.verify_blob(computed_sha, copied_bytes)
+        rel = blobs.blob_rel_path(computed_sha).replace("\\", "/")
+        state = blobs.verify_blob(rel, computed_sha, copied_bytes)
         if state is False:
             raise IntegrityError("blob store corruption at %s" % computed_sha)
         if state is None:

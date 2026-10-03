@@ -300,7 +300,20 @@ class KnowledgeStore:
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._conn.execute("PRAGMA busy_timeout=15000")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Non-destructive column additions for pre-existing databases."""
+        migrations = (
+            ("snapshots", "state", "TEXT NOT NULL DEFAULT 'verified'"),
+        )
+        for table, column, decl in migrations:
+            columns = {row[1] for row in self._conn.execute(
+                "PRAGMA table_info(%s)" % table)}
+            if column not in columns:
+                self._conn.execute(
+                    "ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
 
     def close(self) -> None:
         with self._lock:
@@ -425,6 +438,14 @@ class KnowledgeStore:
                 "SELECT * FROM snapshots WHERE source=? AND doc_id=? AND version_id=?",
                 (source, doc_id, version_id)).fetchone()
         return dict(row) if row else None
+
+    def mark_snapshot_state(self, source: str, doc_id: str, version_id: str,
+                            state: str) -> None:
+        """R04: blob integrity state transitions (verified -> corrupted)."""
+        with self._tx() as conn:
+            conn.execute(
+                "UPDATE snapshots SET state=? WHERE source=? AND doc_id=?"
+                " AND version_id=?", (state, source, doc_id, version_id))
 
     # ----------------------------------------------------------------- jobs
     def register_job(self, source: str, doc_id: str, version_id: str, stage: str,
@@ -975,6 +996,18 @@ class KnowledgeStore:
                 "SELECT 1 FROM extractions WHERE extraction_id=?",
                 (extraction_id,)).fetchone()
         return row is not None
+
+    def has_any_extraction(self, extraction_ids) -> Optional[str]:
+        """Return the first existing extraction_id among candidates, else None."""
+        ids = list(extraction_ids)
+        if not ids:
+            return None
+        placeholders = ",".join("?" for _ in ids)
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT extraction_id FROM extractions WHERE extraction_id"
+                " IN (%s) LIMIT 1" % placeholders, ids).fetchone()
+        return row["extraction_id"] if row else None
 
     def record_extraction(self, extraction: Dict[str, Any],
                           blocks: List[Dict[str, Any]]) -> bool:
