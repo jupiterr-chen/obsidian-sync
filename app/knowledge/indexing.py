@@ -64,58 +64,105 @@ class SearchFilters:
     collections: Optional[List[str]] = None  # only "source_documents" exists today
 
 
-def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
-    """Build and publish a new index generation from all current extractions.
+SELECTION_POLICY = "current-version-latest-extraction-v1"
 
-    Shadow build: postings are written under 'building' status, verified, then
-    the active pointer is swapped in one transaction. A no-op when the
-    manifest hash already matches the active generation (unless force).
-    """
+
+def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
+    """R08/ADR0007: index only the CURRENT source version per document,
+    using that version's latest non-failed extraction (deterministic
+    created_at + extraction_id tiebreak). Historical extractions stay
+    queryable via the evidence/blocks APIs, never through the default
+    search index."""
     with kb._lock:
         rows = kb._conn.execute(
             "SELECT b.block_id, b.text, b.extraction_id FROM blocks b"
             " JOIN extractions e ON e.extraction_id = b.extraction_id"
-            " WHERE e.status != 'failed'"
+            " WHERE e.extraction_id IN ("
+            "   SELECT extraction_id FROM ("
+            "     SELECT e2.extraction_id,"
+            "            ROW_NUMBER() OVER ("
+            "              PARTITION BY e2.source, e2.doc_id"
+            "              ORDER BY e2.created_at DESC, e2.extraction_id DESC) AS rn"
+            "     FROM extractions e2"
+            "     JOIN kb_versions v ON v.source = e2.source"
+            "        AND v.doc_id = e2.doc_id AND v.version_id = e2.version_id"
+            "     WHERE v.is_current = 1 AND e2.status != 'failed')"
+            "   WHERE rn = 1)"
             " ORDER BY b.extraction_id, b.ordinal").fetchall()
+    return rows
+
+
+def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
+    """Build and publish an index generation (R07 lifecycle).
+
+    building -> postings written -> verified (count check in the same tx)
+    -> active (atomic pointer swap). Crash residue (a building or unverified
+    row) is DELETED and rebuilt, never blindly activated; a healthy active
+    generation keeps serving throughout and is only replaced by a verified
+    successor. No-op when the active manifest already matches.
+    """
+    rows = _selected_blocks(kb)
     manifest_source = "\n".join("%s:%s" % (r["block_id"], r["extraction_id"])
                                 for r in rows)
-    manifest_hash = hashlib.sha256(manifest_source.encode("utf-8")).hexdigest()
+    manifest_hash = hashlib.sha256(
+        (SELECTION_POLICY + "\x00" + manifest_source).encode("utf-8")).hexdigest()
     active = kb.active_generation()
     if active and active["manifest_hash"] == manifest_hash and not force:
         return {"ok": True, "changed": False, "generation_id": active["generation_id"],
                 "manifest_hash": manifest_hash, "blocks": len(rows)}
 
     generation_id = "gen-" + manifest_hash[:24]
-    if not kb.get_generation(generation_id):
-        kb.create_generation(generation_id, manifest_hash)
-        postings: List[Tuple[str, str, int]] = []
-        doc_terms: List[Tuple[str, int, int]] = []
-        for row in rows:
-            counts: Dict[str, int] = {}
-            for term in tokenize(row["text"]):
-                counts[term] = counts.get(term, 0) + 1
-            for term, tf in counts.items():
-                postings.append((term, row["block_id"], tf))
-            doc_terms.append((row["block_id"], len(counts), len(row["text"])))
-        kb.write_postings(generation_id, postings, doc_terms)
+    existing = kb.get_generation(generation_id)
+    if existing is not None and existing["status"] in ("building", "retired"):
+        # crash residue from an interrupted build: discard and rebuild
+        kb.delete_postings(generation_id)
+        with kb._tx() as conn:
+            conn.execute("DELETE FROM index_generations WHERE generation_id=?",
+                         (generation_id,))
+        existing = None
+    if existing is not None and existing["status"] == "active":
+        kb.retire_orphan_generations()
+        return {"ok": True, "changed": False, "generation_id": generation_id,
+                "manifest_hash": manifest_hash,
+                "stats": existing.get("stats") or {}}
+    if existing is not None and existing["status"] == "verified":
         stats = kb.doc_term_stats(generation_id)
-        stats["postings"] = len(postings)
-        if stats["blocks"] != len(rows):
-            kb.retire_orphan_generations()
-            return {"ok": False, "changed": False, "error": "verification_failed",
-                    "detail": "indexed %d of %d blocks" % (stats["blocks"], len(rows))}
+        stats["postings"] = kb._conn.execute(
+            "SELECT COUNT(*) FROM index_postings WHERE generation_id=?",
+            (generation_id,)).fetchone()[0]
         kb.activate_generation(generation_id, stats)
         kb.retire_orphan_generations()
-        kb.emit_event("index.published", None, None, None,
-                      {"generation_id": generation_id, "manifest_hash": manifest_hash,
-                       **stats},
-                      event_id="evt-index-" + manifest_hash[:32])
         return {"ok": True, "changed": True, "generation_id": generation_id,
                 "manifest_hash": manifest_hash, "stats": stats}
-    # generation exists (previous build); just re-publish
-    stats = kb.doc_term_stats(generation_id)
+
+    kb.create_generation(generation_id, manifest_hash)
+    postings: List[Tuple[str, str, int]] = []
+    doc_terms: List[Tuple[str, int, int]] = []
+    for row in rows:
+        counts: Dict[str, int] = {}
+        for term in tokenize(row["text"]):
+            counts[term] = counts.get(term, 0) + 1
+        for term, tf in counts.items():
+            postings.append((term, row["block_id"], tf))
+        doc_terms.append((row["block_id"], len(counts), len(row["text"])))
+    kb.write_postings(generation_id, postings, doc_terms)
+    try:
+        stats = kb.finalize_generation(generation_id, expected_blocks=len(rows))
+    except ValueError as exc:
+        # failed build: keep the previous healthy active, retire the residue
+        kb.delete_postings(generation_id)
+        with kb._tx() as conn:
+            conn.execute("DELETE FROM index_generations WHERE generation_id=?",
+                         (generation_id,))
+        kb.retire_orphan_generations()
+        return {"ok": False, "changed": False, "error": "verification_failed",
+                "detail": str(exc)}
     kb.activate_generation(generation_id, stats)
     kb.retire_orphan_generations()
+    kb.emit_event("index.published", None, None, None,
+                  {"generation_id": generation_id, "manifest_hash": manifest_hash,
+                   "selection_policy": SELECTION_POLICY, **stats},
+                  event_id="evt-index-" + manifest_hash[:32])
     return {"ok": True, "changed": True, "generation_id": generation_id,
             "manifest_hash": manifest_hash, "stats": stats}
 
@@ -123,6 +170,8 @@ def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
 def _document_filter_sql(filters: SearchFilters) -> Tuple[List[str], List[Any]]:
     where: List[str] = []
     params: List[Any] = []
+    # R08: unavailable (source missing/withdrawn) documents never match
+    where.append("d.available = 1")
     if filters.sources:
         where.append("d.source IN (%s)" % ",".join("?" for _ in filters.sources))
         params.extend(filters.sources)
@@ -143,11 +192,16 @@ def _document_filter_sql(filters: SearchFilters) -> Tuple[List[str], List[Any]]:
         params.append(filters.date_to)
     if filters.as_of:
         if filters.as_of_mode == "public":
-            where.append(date_expr + " <= ?")
+            # R08: a public-mode claim needs an actual public date basis;
+            # falling back to first_seen would fabricate publication times.
+            public_basis = ("COALESCE(d.report_date,"
+                            " substr(d.published_at,1,10), d.filing_date)")
+            where.append(public_basis + " IS NOT NULL AND " + public_basis
+                         + " <= ?")
             params.append(filters.as_of[:10])
-        else:  # system: materialized/known-to-system time
-            where.append("d.first_seen_at IS NOT NULL AND d.first_seen_at <= ?")
-            params.append(filters.as_of)
+        # system mode is enforced per-version in search() (R08): the
+        # document check alone cannot prove the CURRENT version was
+        # observable at as_of.
     return where, params
 
 
@@ -219,6 +273,14 @@ def search(kb: KnowledgeStore, query: str, filters: Optional[SearchFilters] = No
                 (doc["source"], doc["doc_id"], *params),
             ).fetchone()
             if not check:
+                continue
+        if filters.as_of and filters.as_of_mode == "system":
+            # R08: version-level observability. Unknown first_observed_at is
+            # NOT visible at any past as_of (no fabricated history).
+            version = kb.get_version(block["source"], block["doc_id"],
+                                     block["version_id"])
+            first_observed = (version or {}).get("first_observed_at")
+            if not first_observed or first_observed > filters.as_of:
                 continue
         hits.append(SearchHit(block=block, score=round(scores[block_id], 4),
                               matched_terms=sorted(set(matched.get(block_id, [])))))

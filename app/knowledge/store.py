@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS kb_versions (
     state TEXT NOT NULL,
     content_changed_at TEXT,
     synced_at TEXT NOT NULL,
+    first_observed_at TEXT,
     PRIMARY KEY (source, doc_id, version_id)
 );
 CREATE INDEX IF NOT EXISTS idx_kb_versions_state ON kb_versions(state);
@@ -307,6 +308,7 @@ class KnowledgeStore:
         """Non-destructive column additions for pre-existing databases."""
         migrations = (
             ("snapshots", "state", "TEXT NOT NULL DEFAULT 'verified'"),
+            ("kb_versions", "first_observed_at", "TEXT"),
         )
         for table, column, decl in migrations:
             columns = {row[1] for row in self._conn.execute(
@@ -314,6 +316,10 @@ class KnowledgeStore:
             if column not in columns:
                 self._conn.execute(
                     "ALTER TABLE %s ADD COLUMN %s %s" % (table, column, decl))
+        # R08: pre-existing rows keep first_observed_at NULL = unknown.
+        # Fabricating an observation time from the current sync stamp would
+        # let historical as_of queries claim knowledge this system never
+        # had; unknown stays invisible to past-mode queries.
 
     def close(self) -> None:
         with self._lock:
@@ -382,8 +388,8 @@ class KnowledgeStore:
                 conn.execute(
                     "INSERT INTO kb_versions ("
                     " source, doc_id, version_id, sha256, bytes, media_type, ext, rel_path,"
-                    " is_current, state, content_changed_at, synced_at)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+                    " is_current, state, content_changed_at, synced_at, first_observed_at)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
                     " ON CONFLICT(source, doc_id, version_id) DO UPDATE SET"
                     "  is_current=excluded.is_current, state=excluded.state,"
                     "  rel_path=excluded.rel_path, synced_at=excluded.synced_at",
@@ -393,6 +399,8 @@ class KnowledgeStore:
                         row.get("ext"), row.get("rel_path"),
                         1 if row.get("is_current") else 0, row.get("state") or "ready",
                         row.get("content_changed_at"), synced_at,
+                        row.get("first_observed_at") or row.get("synced_at")
+                        or synced_at,
                     ),
                 )
         return {"versions": len(rows), "new_versions": new_versions,
@@ -588,8 +596,22 @@ class KnowledgeStore:
         return result
 
     def activate_generation(self, generation_id: str, stats: Dict[str, Any]) -> None:
-        """Atomically publish one generation and retire any previous active."""
+        """Atomically publish one generation and retire any previous active.
+
+        R07: only VERIFIED generations may activate; a building/unverified
+        generation (crash residue) is refused instead of publishing an
+        empty or partial index over a healthy one.
+        """
         with self._tx() as conn:
+            row = conn.execute(
+                "SELECT status FROM index_generations WHERE generation_id=?",
+                (generation_id,)).fetchone()
+            if row is None:
+                raise ValueError("generation %r not found" % generation_id)
+            if row["status"] != "verified":
+                raise ValueError(
+                    "generation %r is %s, not verified; refusing to publish"
+                    % (generation_id, row["status"]))
             current = conn.execute(
                 "SELECT generation_id FROM index_generations WHERE status='active'"
             ).fetchone()
@@ -602,6 +624,42 @@ class KnowledgeStore:
                 " stats_json=? WHERE generation_id=?",
                 (utc_now(), json.dumps(stats, ensure_ascii=False), generation_id),
             )
+
+    def finalize_generation(self, generation_id: str,
+                            expected_blocks: int) -> Dict[str, int]:
+        """Verify posting counts IN TRANSACTION and mark the generation
+        verified (R07). Raises when the write is incomplete."""
+        with self._tx() as conn:
+            stats_row = conn.execute(
+                "SELECT COUNT(*) blocks, COALESCE(SUM(terms),0) terms,"
+                " COALESCE(SUM(length),0) length FROM index_doc_terms"
+                " WHERE generation_id=?", (generation_id,)).fetchone()
+            postings = conn.execute(
+                "SELECT COUNT(*) FROM index_postings WHERE generation_id=?",
+                (generation_id,)).fetchone()[0]
+            if stats_row["blocks"] != expected_blocks:
+                raise ValueError(
+                    "generation %s verification failed: %d of %d blocks"
+                    % (generation_id, stats_row["blocks"], expected_blocks))
+            conn.execute(
+                "UPDATE index_generations SET status='verified', stats_json=?"
+                " WHERE generation_id=?",
+                (json.dumps({"blocks": stats_row["blocks"],
+                             "terms": stats_row["terms"],
+                             "total_length": stats_row["length"],
+                             "postings": postings}, ensure_ascii=False),
+                 generation_id))
+        return {"blocks": stats_row["blocks"], "terms": stats_row["terms"],
+                "total_length": stats_row["length"], "postings": postings}
+
+    def delete_postings(self, generation_id: str) -> None:
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM index_postings WHERE generation_id=?",
+                (generation_id,))
+            conn.execute(
+                "DELETE FROM index_doc_terms WHERE generation_id=?",
+                (generation_id,))
 
     def write_postings(self, generation_id: str,
                        postings: List[Tuple[str, str, int]],
