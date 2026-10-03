@@ -89,14 +89,24 @@ def main() -> int:
     os.makedirs(args.state_dir, exist_ok=True)
     kb = KnowledgeStore(shadow_config.knowledge_db)
     try:
-        # mirror the catalog identities, then snapshot+extract; job limits
-        # keep this batch to the sampled scale
+        # mirror the catalog identities, then narrow the work queues to
+        # EXACTLY the sampled subset (this is an isolated shadow DB; pruning
+        # job registrations here touches nothing else)
         stats = SyncService(kb, shadow_config).run()
+        wanted = {(s["source"], s["doc_id"], s["version_id"])
+                  for s in samples}
+        with kb._tx() as conn:
+            rows = conn.execute(
+                "SELECT id, source, doc_id, version_id FROM jobs"
+                " WHERE status='pending'").fetchall()
+            for row in rows:
+                if (row["source"], row["doc_id"], row["version_id"])                         not in wanted:
+                    conn.execute("DELETE FROM jobs WHERE id=?", (row["id"],))
         library_config = Config.load(shadow_config.library_config).resolve(
             os.path.dirname(os.path.abspath(shadow_config.library_config)))
         runner = JobRunner(kb, shadow_config, library_config)
-        snap_result = runner.run_snapshot_jobs(limit=len(samples) + 5)
-        ext_result = runner.run_extract_jobs(limit=len(samples) + 5)
+        snap_result = runner.run_snapshot_jobs()
+        ext_result = runner.run_extract_jobs()
         report.update({
             "sync": {k: stats.get(k) for k in ("documents", "versions",
                                                "new_documents", "new_versions")},
