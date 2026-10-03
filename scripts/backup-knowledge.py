@@ -103,7 +103,12 @@ def cmd_backup(args) -> int:
 
 
 def cmd_drill(args) -> int:
-    """Restore the backup into an independent temp dir and verify (A22)."""
+    """Restore the backup into an independent temp dir and verify (A22, R14).
+
+    Blob source defaults to the backup's OWN blobs directory (recorded in
+    the sidecar report) so a drill can never silently pass against the
+    production snapshot store. Referenced-but-missing blobs are a FAILURE.
+    --database-only performs an explicit PARTIAL restore (never ok)."""
     started = time.monotonic()
     drill_dir = args.dir or os.path.join(
         os.path.dirname(os.path.abspath(args.backup)), "drill-%s"
@@ -127,22 +132,45 @@ def cmd_drill(args) -> int:
                 "SELECT store_path, bytes, sha256 FROM snapshot_blobs").fetchall()
     except sqlite3.DatabaseError as exc:
         problems.append("backup database unreadable: %s" % exc)
-    verified = 0
-    if args.snapshots and os.path.isdir(args.snapshots):
-        for row in rows:
-            path = os.path.join(args.snapshots, *row["store_path"].split("/"))
-            if not os.path.isfile(path):
-                problems.append("missing blob %s" % row["store_path"])
-                continue
-            if os.path.getsize(path) != row["bytes"]:
-                problems.append("size mismatch %s" % row["store_path"])
-                continue
-            if sha256_file(path) != row["sha256"]:
-                problems.append("hash mismatch %s" % row["store_path"])
-                continue
-            verified += 1
+    database_only = bool(getattr(args, "database_only", False))
+    blob_root = None
+    if database_only:
+        problems.append("database-only drill: blob verification skipped by"
+                        " explicit request (PARTIAL restore)")
     else:
-        problems.append("snapshot root not provided; blob verification skipped")
+        blob_root = getattr(args, "snapshots", None)
+        if not blob_root:
+            sidecar = args.backup + ".report.json"
+            if os.path.isfile(sidecar):
+                try:
+                    with open(sidecar, "r", encoding="utf-8") as handle:
+                        blob_root = json.load(handle).get("blobs_dir")
+                except (ValueError, OSError):
+                    blob_root = None
+        if not blob_root or not os.path.isdir(blob_root):
+            problems.append("no blob source: backup has no bundled blobs and"
+                            " no --snapshots given; referenced blobs are"
+                            " UNVERIFIED - full recovery not proven")
+        else:
+            for row in rows:
+                path = os.path.join(blob_root, *row["store_path"].split("/"))
+                if not os.path.isfile(path):
+                    problems.append("missing blob %s" % row["store_path"])
+                    continue
+                if os.path.getsize(path) != row["bytes"]:
+                    problems.append("size mismatch %s" % row["store_path"])
+                    continue
+                if sha256_file(path) != row["sha256"]:
+                    problems.append("hash mismatch %s" % row["store_path"])
+                    continue
+    verified = 0
+    if blob_root and os.path.isdir(blob_root) and not database_only:
+        # count only fully verified blobs (problems already recorded above)
+        for row in rows:
+            path = os.path.join(blob_root, *row["store_path"].split("/"))
+            if (os.path.isfile(path) and os.path.getsize(path) == row["bytes"]
+                    and sha256_file(path) == row["sha256"]):
+                verified += 1
     try:
         with sqlite3.connect(restored_db) as conn:
             check = conn.execute("PRAGMA integrity_check").fetchone()[0]
@@ -151,14 +179,18 @@ def cmd_drill(args) -> int:
     except sqlite3.DatabaseError as exc:
         problems.append("integrity check failed: %s" % exc)
     elapsed = time.monotonic() - started
+    partial = database_only or not (blob_root and os.path.isdir(blob_root))
     report = {
         "kind": "knowledge-restore-drill", "at": utc_now(),
         "restored_to": restored_db, "table_counts": counts,
         "blobs_verified": verified, "problems": problems,
-        "ok": not [p for p in problems if "skipped" not in p],
+        "partial": partial,
+        "ok": not problems and not partial,
         "elapsed_seconds": round(elapsed, 3),
-        "rto_note": "restore+verify wall clock = %.3fs (drill, isolated dir)"
-                    % elapsed,
+        "rto_note": ("PARTIAL restore (database only) - does NOT satisfy A22"
+                     if partial else
+                     "restore+verify wall clock = %.3fs (drill, isolated"
+                     " dir)" % elapsed),
     }
     report_path = os.path.join(drill_dir, "drill-report.json")
     with open(report_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -177,7 +209,11 @@ def main(argv=None) -> int:
     backup.add_argument("--snapshots", default=None)
     drill = sub.add_parser("drill")
     drill.add_argument("--backup", required=True)
-    drill.add_argument("--snapshots", default=None)
+    drill.add_argument("--snapshots", default=None,
+                       help="explicit blob root override (default: the"
+                            " backup's own bundled blobs directory)")
+    drill.add_argument("--database-only", action="store_true",
+                       help="partial restore: database only, never ok")
     drill.add_argument("--dir", default=None)
     args = parser.parse_args(argv)
     if args.command == "backup":

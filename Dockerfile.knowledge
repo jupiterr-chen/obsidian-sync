@@ -1,0 +1,20 @@
+# Knowledge-layer image: library code + pinned PDF/OCR runtime (R13).
+# Built by deploy/docker-compose.full.yml and docker-compose.knowledge.yml;
+# the plain Dockerfile remains the stdlib-only first-layer image.
+FROM python:3.11-slim
+
+WORKDIR /app
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+COPY requirements-knowledge.txt /app/requirements-knowledge.txt
+RUN pip install --no-cache-dir -r /app/requirements-knowledge.txt && \
+    python -c "from rapidocr_onnxruntime import RapidOCR; RapidOCR()" || true
+    # the warm-up pre-bundles the default PP-OCR models into the image so
+    # containers never download models at runtime (offline reproducibility)
+
+COPY app /app/app
+COPY contracts /app/contracts
+
+CMD ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]

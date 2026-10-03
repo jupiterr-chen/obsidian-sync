@@ -9,7 +9,7 @@
 x-knowledge-base: &knowledge-base
   build:
     context: ..
-    dockerfile: Dockerfile
+    dockerfile: Dockerfile.knowledge
   env_file:
     - ../config/.env
   volumes:
@@ -34,10 +34,7 @@ services:
           cpus: "1.5"
           memory: 1g
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import sys; sys.path.insert(0, '/app'); "
-             "from knowledge.worker import read_state, worker_is_stale; "
-             "sys.exit(0 if worker_is_stale('/state/knowledge-worker.json') is False else 1)"]
+      test: ["CMD", "python", "-m", "knowledge.healthcheck", "worker"]
       interval: 60s
       timeout: 10s
       retries: 3
@@ -53,8 +50,7 @@ services:
           cpus: "0.5"
           memory: 512m
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/kb/v1/health')"]
+      test: ["CMD", "python", "-m", "knowledge.healthcheck", "api"]
       interval: 30s
       timeout: 5s
       retries: 3

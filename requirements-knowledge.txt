@@ -1,0 +1,6 @@
+# Knowledge-layer runtime dependencies (pinned for reproducible images).
+# The first-layer library stays stdlib-only; these are needed by the
+# knowledge worker's PDF engine, OCR and image handling.
+pypdfium2==5.13.0
+rapidocr-onnxruntime==1.4.4
+Pillow==12.3.0
