@@ -11,7 +11,7 @@ x-knowledge-base: &knowledge-base
     context: ..
     dockerfile: Dockerfile.knowledge
   env_file:
-    - ../config/.env
+    - ${RESEARCHKB_ENV_FILE:-../.env}
   volumes:
     # first-layer catalog: READ-ONLY for the knowledge layer (ADR0003)
     - ../catalog:/catalog:ro
