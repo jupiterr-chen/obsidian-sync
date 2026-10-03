@@ -26,6 +26,14 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-03 独立评审修复完成（R01-R15 全部 fixed，待复验）
+
+- 独立评审（基线 534014a，NEEDS_CHANGES，15 组问题）见 `INDEPENDENT-REVIEW-20261002.md`；修复任务书 `docs/15`。
+- RF0-RF6 完成：预算账本/角色装配/快照校验/配置身份/PDF 页序引擎/HTML 偏移/选版 as_of/索引恢复/混合先过滤/固定 URL 快照服务/分页/写回唯一性/影响 outbox/部署可执行/恢复严格化。逐项 RED/GREEN 证据在 `remediation-log.md`，提交 4b90a75 → 6ffb0d6。
+- 最终回归：**268 tests OK (2 skipped)**（基线 222 + 46 修复回归）。
+- 服务器：两份 compose `docker compose config` 通过；knowledge 镜像 build + 容器内 pypdfium2/RapidOCR/模块冒烟通过；OCR v3 回填未停仍在跑（旧代码进程，完成后重启 worker 采用新逻辑）。
+- 真实切换前置：评审方复验 R01-R15 + OCR 回填完成 + 用户明确确认旧栈下线（CUTOVER.md 已可执行）。
+
 ## 2026-10-02 真实数据阶段开启（用户已授权）
 
 - **SSH 授权**：`chen@192.168.1.150`（密钥认证可用）；新工程目录 `/vol2/1000/10.Develop/obsidian-sync/`（与 research-kb 同级）已建立：`repo/`（代码，git archive 上传）、`config-knowledge.json`/`config-library.json`（主机路径版）、`state/`（2.2G）。

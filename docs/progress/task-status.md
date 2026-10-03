@@ -30,6 +30,28 @@
 |P6-02 备份、恢复及回滚|accepted（工具+离线演练）/A22真实演练BLOCKED|main-agent|P3|9a20156|docs/progress/p6-report.md|同上|生产后真实RPO/RTO演练|
 |P6-03 研发与资金应用接入|accepted（接入上下文清单+示例）/真实客户端BLOCKED|main-agent|P3|9a20156|docs/progress/p6-report.md|客户端与生产|接入验收A13/A19|
 
+## 评审修复（2026-10-03，独立评审 R01-R15）
+
+|问题|状态|修复提交|回归|
+|---|---|---|---|
+|R01 预算/账本|fixed|4b90a75|test_review_regressions.R01BudgetTest|
+|R03 provider 装配|fixed|4b90a75|R03ProviderWiringTest|
+|R04 快照消费校验|fixed|310cad4|test_review_rf2.R04|
+|R02 配置身份|fixed|310cad4|test_review_rf2.R02|
+|R05 PDF 页序/引擎|fixed|310cad4|test_review_rf2.R05|
+|R06 HTML 偏移|fixed|310cad4|test_review_rf2.R06|
+|R08 选版/as_of|fixed（ADR0007）|1686d7d|test_review_rf3.R08|
+|R07 索引恢复|fixed|1686d7d|test_review_rf3.R07|
+|R09 混合先过滤|fixed|93e8298|test_review_rf4.R09|
+|R11 固定 URL/快照|fixed|93e8298|test_review_rf4.R11|
+|R12 分页|fixed|93e8298|test_review_rf4.R12|
+|R10 写回唯一性|fixed|29590dd|test_review_rf5.R10|
+|R15 影响 outbox|fixed|29590dd|test_review_rf5.R15|
+|R13 部署可执行|fixed（服务器 compose config + 镜像冒烟通过）|36c84b5..6ffb0d6|test_review_rf6.R13|
+|R14 恢复严格化|fixed|36c84b5|test_review_rf6.R14|
+
+受影响的 P1-P6 离线 accepted 状态按任务书重开为 NEEDS_CHANGES → 现 fixed，待独立复验（RF7）。真实 NOT_RUN/BLOCKED 项不变。最终回归 268 OK。
+
 ## 记录
 
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。
