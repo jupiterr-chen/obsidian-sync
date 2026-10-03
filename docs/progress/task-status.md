@@ -54,6 +54,23 @@
 
 受影响的 P1-P6 离线 accepted 状态按任务书重开为 NEEDS_CHANGES → 现 fixed，待独立复验（RF7）。真实 NOT_RUN/BLOCKED 项不变。最终回归 268 OK。
 
+## 第二轮评审修复（2026-10-03，RE-REVIEW-20261003 S01-S10）
+
+|问题|状态|修复提交|回归载体|
+|---|---|---|---|
+|S01 预算原子性|fixed|01c02d7|test_second_review.S01BudgetAtomicityTest|
+|S02 写回覆盖窗口|fixed|a7640fd|S02WritebackAppendOnlyTest|
+|S03 public 时间泄漏|fixed|a7640fd|S03PublicAsOfTest|
+|S04 快照字节一致性|fixed|a7640fd|S04SnapshotBytesTest|
+|S05 OCR 置信度门禁|fixed|a7640fd|S05OcrConfidenceGateTest|
+|S06 图片重复 OCR|fixed|a7640fd|S06ImageDuplicateOcrTest|
+|S07 outbox 事务间隙|fixed|01c02d7|S07OutboxAtomicTest|
+|S08 游标元数据一致性|fixed|a7640fd|S08CursorMetadataTest|
+|S09 部署启动/构建/路径|fixed（隔离目录实测启动）|e369d32|test_second_review_s09|
+|S10 独立召回/缓存隔离|fixed|a7640fd|S10IndependentRecallTest|
+
+最终回归 287 OK。逐项 RED/GREEN、隔离启动验收记录见 `second-remediation-log.md`。真实 NOT_RUN/BLOCKED 项不变。
+
 ## 记录
 
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。

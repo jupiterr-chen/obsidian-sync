@@ -1,5 +1,8 @@
 # 评审指南（给独立评审者 / Codex）
 
+> **第二轮复核（基线 4949dcd）：NEEDS_CHANGES，S01-S10**，见 [RE-REVIEW-20261003.md](RE-REVIEW-20261003.md)。
+> **S01-S10 已全部修复（2026-10-03）**：RED/GREEN 矩阵与隔离启动验收见 [second-remediation-log.md](second-remediation-log.md)；回归载体 `app/tests/test_second_review*.py`。复验以 ≥ `e369d32` 重跑探针与回归。
+
 > **最新独立复核：2026-10-03，基线 4949dcd，NEEDS_CHANGES。** 268 回归 OK（2 skipped），新增反例确认 S01–S10 尚待处理（6 P1 / 4 P2）。此前 R01–R15 全 fixed/RF7 闭环是提交者历史声明，未获本轮独立验收。先读[第二轮报告](RE-REVIEW-20261003.md)、[SR 任务书](../17-second-review-taskbook.md)及[执行提示词](../18-second-review-fix-prompt.md)。真实 NOT_RUN/BLOCKED 不变；本次未操作生产。以下历史记录保留。
 
 > **首轮独立复核（基线 534014a）：整体 NEEDS_CHANGES**，见[2026-10-02 评审报告](INDEPENDENT-REVIEW-20261002.md)及[修复任务书](../15-review-remediation-taskbook.md)。

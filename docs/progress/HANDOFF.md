@@ -28,6 +28,14 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-03（晚）第二轮评审修复完成（S01-S10 全部 fixed，待复验）
+
+- 二轮复核（RE-REVIEW-20261003，基线 4949dcd，NEEDS_CHANGES，S01-S10）→ 全部修复。RED/GREEN 矩阵与隔离启动验收见 `second-remediation-log.md`；提交 01c02d7 → a7640fd → e369d32。
+- 最终回归：**287 tests OK (2 skipped)**（二轮基线 268 + 19）。
+- 隔离启动验收（S09）：服务器 /tmp 独立目录中 library 显式 serve（/healthz ok，100 文档）、knowledge API（/api/kb/v1/health ok）、worker 一次性闭环（90 版本→86 快照→索引发布）全部实测；生产栈与回填未动。
+- 复验入口：以 ≥ e369d32 重跑 re-review-probe-20261003.py + test_second_review*。
+- 待用户决定：第四轮全量重提取（采用修复后身份逻辑）；生产切换（CUTOVER）。
+
 ## 2026-10-03 独立评审修复完成（R01-R15 全部 fixed，待复验）
 
 - 独立评审（基线 534014a，NEEDS_CHANGES，15 组问题）见 `INDEPENDENT-REVIEW-20261002.md`；修复任务书 `docs/15`。
