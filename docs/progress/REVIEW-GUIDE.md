@@ -1,5 +1,7 @@
 # 评审指南（给独立评审者 / Codex）
 
+> **最新独立复核：第三轮（2026-10-03，源码 cb254df）NEEDS_CHANGES。** 287 tests OK / 2 skipped；T01–T07 共4 P1、3 P2待修复。先读[第三轮报告](THIRD-REVIEW-20261003.md)、[下一步任务书](../19-release-readiness-taskbook.md)与[提示词](../20-release-readiness-prompt.md)。先过G1再做小批影子验收，暂不启动全量重提取或生产切换。以下完成声明为历史记录，以最新独立验收为准。
+
 > **第二轮复核（基线 4949dcd）：NEEDS_CHANGES，S01-S10**，见 [RE-REVIEW-20261003.md](RE-REVIEW-20261003.md)。
 > **S01-S10 已全部修复（2026-10-03）**：RED/GREEN 矩阵与隔离启动验收见 [second-remediation-log.md](second-remediation-log.md)；回归载体 `app/tests/test_second_review*.py`。复验以 ≥ `e369d32` 重跑探针与回归。
 

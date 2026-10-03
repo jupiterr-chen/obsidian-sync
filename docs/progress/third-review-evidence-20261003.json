@@ -1,0 +1,141 @@
+{
+  "source_commit": "cb254df",
+  "date": "2026-10-03",
+  "verdict": "NEEDS_CHANGES",
+  "findings": {
+    "P1": 4,
+    "P2": 3
+  },
+  "regression": {
+    "command": "PYTHONPATH=app python -m unittest discover -s app/tests",
+    "tests": 287,
+    "skipped": 2,
+    "seconds": 59.502,
+    "exit_code": 0
+  },
+  "probe_command": "python docs/progress/third-review-probe-20261003.py",
+  "probe_outputs": {
+    "old_database_upgrade": {
+      "opened": false,
+      "error": "no such column: reservation_id"
+    },
+    "unknown_settlement_crash": {
+      "remaining": 10,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "calls": 0
+      },
+      "expected_max_remaining": 2
+    },
+    "unknown_replay": {
+      "usage": {
+        "input_tokens": 16,
+        "output_tokens": 0,
+        "calls": 2
+      },
+      "expected_input": 8
+    },
+    "paid_bad_vector_release": {
+      "remaining": 100,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "calls": 0
+      }
+    },
+    "retry_request_cap": {
+      "cap": 1,
+      "mock_http_attempts": 2,
+      "accounted_requests": 1
+    },
+    "public_revision_inherits_old_date": {
+      "version_public_at": "2026-01-01T00:00:00Z",
+      "cutoff": "2026-07-01",
+      "hits": 1
+    },
+    "same_length_metadata_cursor": {
+      "same_epoch": true,
+      "first_hits": 2,
+      "second": {
+        "status": 200,
+        "second_hits": 0,
+        "next": null
+      },
+      "visible_remaining": 2
+    },
+    "empty_ocr_multi_page": {
+      "status": "ready",
+      "unmet_ocr_pages": 0,
+      "page_ocr_status": [
+        "text_layer",
+        "text_layer",
+        "text_layer"
+      ],
+      "issues": [
+        "page_1_needs_ocr:no_text_layer",
+        "page_1_ocr_fallback_failed"
+      ]
+    },
+    "processing_identity_upgrade": {
+      "old_digest": "2f866f60fc7b4ba5cc5e6e284f9aa8c8b378638b49ace22790389127e951ff6f",
+      "new_digest": "2f866f60fc7b4ba5cc5e6e284f9aa8c8b378638b49ace22790389127e951ff6f",
+      "same": true
+    },
+    "cross_provider_cache": {
+      "provider_a_calls": 1,
+      "provider_b_calls": 0,
+      "stored_vector": [
+        1.0,
+        0.0
+      ]
+    },
+    "semantic_after_first_200": {
+      "allowed_blocks": 205,
+      "target_position": 205,
+      "returned_target": false,
+      "returned_count": 20
+    },
+    "writeback_repeat_new_revision": {
+      "markdown_files": 4,
+      "v2_copies": 3,
+      "expected_v2_copies": 1
+    }
+  },
+  "mapping": {
+    "T01": [
+      "old_database_upgrade"
+    ],
+    "T02": [
+      "unknown_settlement_crash",
+      "unknown_replay",
+      "paid_bad_vector_release",
+      "retry_request_cap"
+    ],
+    "T03": [
+      "public_revision_inherits_old_date"
+    ],
+    "T04": [
+      "same_length_metadata_cursor"
+    ],
+    "T05": [
+      "empty_ocr_multi_page",
+      "processing_identity_upgrade"
+    ],
+    "T06": [
+      "cross_provider_cache",
+      "semantic_after_first_200"
+    ],
+    "T07": [
+      "writeback_repeat_new_revision"
+    ]
+  },
+  "not_run": [
+    "independent Docker build/startup",
+    "production/server operations",
+    "real corpus quality benchmark",
+    "paid provider calls",
+    "full reprocessing"
+  ],
+  "next_gate": "N0-N4 fixes and independent verification -> G1 -> small-batch shadow validation"
+}

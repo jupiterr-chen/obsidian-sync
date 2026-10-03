@@ -2,7 +2,7 @@
 
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
 
-当前交付：设计、M0 整合和 P1–P6 源码已落地，并在真实语料上做过部分处理。**最新独立复核（2026-10-03，基线 4949dcd）：NEEDS_CHANGES，6 个 P1、4 个 P2 待修复。** 本地 268 项回归通过（2 skipped），新增边界反例未通过；不能据此切换生产。旧栈和既有回填状态见 HANDOFF，真实质量/性能/持续运行验收仍保留 NOT_RUN/BLOCKED。
+当前交付：设计、M0 整合和 P1–P6 源码已落地，做过部分真实资料处理。**最新独立复核（2026-10-03，基线 cb254df）：NEEDS_CHANGES，T01–T07 共4 P1、3 P2待修复。** 287项回归运行成功（2 skipped），但旧库升级、异常账本、版本时间等边界反例仍失败。下一步先完成G1，再做小批影子验收；暂不启动全量重提取或生产切换。真实验收保持实际 NOT_RUN/BLOCKED。
 
 ## 阅读顺序
 
@@ -20,7 +20,7 @@
 ## 工程结构
 
 - `app/library/`：**已运行的第一层服务**（标准库实现）：统一目录、适配接入、Markdown 卡片、版本化原文服务、小时调度、文件锁、变更账本与状态面板。
-- `app/tests/`：全部测试（本轮运行 268 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
+- `app/tests/`：全部测试（本轮运行 287 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
 - `app/knowledge/`：知识层（P1-P6）：不可变快照 store、提取/证据块、质量与 OCR 路由、词法+RRF 混合检索、`/api/kb/v1`、事件流、研究记忆（claim/decision/影响分析）、安全写回、worker 调度。CLI：`python -m knowledge sync|run-snapshots|run-extracts|rebuild-index|serve-kb|worker|sample|measure|evidence-links|status`。
 - `src/research_kb/`：目标模块边界职责说明（参考，不建第二套服务）。
 - `contracts/`：版本化数据契约与合成示例。
@@ -36,7 +36,7 @@
 
 ## 下一位agent从这里开始
 
-先读[第二轮评审](docs/progress/RE-REVIEW-20261003.md)、[SR0–SR6 任务书](docs/17-second-review-taskbook.md)和[执行提示词](docs/18-second-review-fix-prompt.md)。当前先完成 S01–S10 源码修复与复验，再继续真实数据验收。无需重做 M0；旧历史 accepted/fixed 声明以最新独立复核为准。
+先读[第三轮评审](docs/progress/THIRD-REVIEW-20261003.md)、[发布前与影子验收任务书](docs/19-release-readiness-taskbook.md)和[执行提示词](docs/20-release-readiness-prompt.md)。按N0–N6推进，先修复可离线复现的T01–T07，再执行真实验收。无需重做M0。
 
 - [主仓库整合任务书](docs/11-integration-taskbook.md)
 - [长任务执行指导书](docs/12-agent-execution-guide.md)
@@ -54,8 +54,14 @@
 - [RF0-RF7修复任务书](docs/15-review-remediation-taskbook.md)
 - [直接交给agent的修复提示词](docs/16-review-fix-prompt.md)
 
-## 最新独立复核（2026-10-03）
+## 第二轮独立复核（历史，2026-10-03）
 
 [第二轮结果](docs/progress/RE-REVIEW-20261003.md) · [证据](docs/progress/re-review-evidence-20261003.json) · [修复任务书](docs/17-second-review-taskbook.md) · [可复制提示词](docs/18-second-review-fix-prompt.md)
 
 R03/R06/R07/R14 首轮具体反例可关闭；其余按第二轮报告继续验收，RF7 未通过。迁移基线保留，本轮未操作生产或真实模型。
+
+## 最新独立复核：第三轮（2026-10-03）
+
+[结果与问题](docs/progress/THIRD-REVIEW-20261003.md) · [证据](docs/progress/third-review-evidence-20261003.json) · [下一步任务书](docs/19-release-readiness-taskbook.md) · [提示词](docs/20-release-readiness-prompt.md)
+
+认可同事务预算预留/成功结算、不可覆盖主文件、同字节快照服务、图片顺序幂等、新版本outbox和部署命令修复；异常/升级/长期重复运行的剩余问题按第三轮报告验收。
