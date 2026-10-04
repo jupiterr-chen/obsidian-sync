@@ -1,5 +1,7 @@
 # 发布前修复与影子验收日志（T01-T07 / G1 / G2）
 
+> **最新独立复核及用户取舍（2026-10-04，7ded572）：基础迁移优先。** 310 tests OK/2 skip；V01–V04保留为fix清单，关闭/暂缓相应增强功能。迁移独立核验数据、恢复、同步与回滚后可推进，不等待全部增强修复或人工质量标注。见[报告](FIFTH-REVIEW-20261004.md)、[任务书](../23-fifth-review-taskbook.md)、[交接提示词](../24-fifth-review-prompt.md)。旧栈在本次检查时仍运行；以下较早结论为历史记录。
+
 基线：第三轮评审 `4036a2b`（评审源码基线 `cb254df`，NEEDS_CHANGES，7 组问题 4P1/3P2）。
 回归命令（PowerShell）：`$env:PYTHONPATH="app"; python -m unittest discover -s app/tests`
 

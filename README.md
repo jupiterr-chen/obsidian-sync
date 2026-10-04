@@ -2,7 +2,7 @@
 
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
 
-当前交付：设计、M0整合与P1–P6实现及真实影子处理已落地。**最新独立复核（2026-10-03，cd3bb5d）：NEEDS_CHANGES，U01–U05共4 P1、1 P2。** 301项回归运行成功（2 skipped），旧库账本迁移、调用入口和真实影子验收仍有缺口。用户已授权复核通过后的整体迁移与停旧栈；条件尚未满足，旧服务保持运行。
+当前交付：设计、M0整合与P1–P6实现及真实影子处理已落地。**2026-10-04独立复核：310 tests OK/2 skip；按用户要求，基础迁移先行，增强功能缺陷后置。** 当前限制模型外发、历史public-as-of与自动候选导出；迁移需独立通过数据、恢复、同步和回滚门禁。见[第五轮报告](docs/progress/FIFTH-REVIEW-20261004.md)与[迁移任务书/fix清单](docs/23-fifth-review-taskbook.md)。
 
 ## 阅读顺序
 
@@ -20,7 +20,7 @@
 ## 工程结构
 
 - `app/library/`：**已运行的第一层服务**（标准库实现）：统一目录、适配接入、Markdown 卡片、版本化原文服务、小时调度、文件锁、变更账本与状态面板。
-- `app/tests/`：全部测试（本轮运行 301 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
+- `app/tests/`：全部测试（本轮运行 310 项，`PYTHONPATH=app python -m unittest discover -s app/tests`）。
 - `app/knowledge/`：知识层（P1-P6）：不可变快照 store、提取/证据块、质量与 OCR 路由、词法+RRF 混合检索、`/api/kb/v1`、事件流、研究记忆（claim/decision/影响分析）、安全写回、worker 调度。CLI：`python -m knowledge sync|run-snapshots|run-extracts|rebuild-index|serve-kb|worker|sample|measure|evidence-links|status`。
 - `src/research_kb/`：目标模块边界职责说明（参考，不建第二套服务）。
 - `contracts/`：版本化数据契约与合成示例。

@@ -1,0 +1,193 @@
+{
+  "baseline": "7ded572c91ed6e72b82a3a41696f3a7cf9d47a52",
+  "tests": {
+    "ran": 310,
+    "skipped": 2,
+    "exit": 0
+  },
+  "synthetic": {
+    "chat_success_cap": {
+      "cap": 1,
+      "attempts": 2,
+      "totals": {
+        "input": 10,
+        "requests": 0,
+        "pages": 0
+      },
+      "outcomes": [
+        "done",
+        "done"
+      ]
+    },
+    "vision_success_cap": {
+      "cap": 1,
+      "attempts": 2,
+      "totals": {
+        "input": 10,
+        "requests": 0,
+        "pages": 2
+      },
+      "outcomes": [
+        "done",
+        "done"
+      ]
+    },
+    "embedding_success_cap": {
+      "cap": 1,
+      "attempts": 2,
+      "totals": {
+        "input": 10,
+        "requests": 0,
+        "pages": 0
+      },
+      "outcomes": [
+        "done",
+        "done"
+      ]
+    },
+    "reconcile_empty_state": {
+      "exit": 0,
+      "db_exists": true,
+      "report": {
+        "kind": "shadow-reconcile",
+        "documents": 1,
+        "with_snapshot": 0,
+        "with_extraction": 0,
+        "ready": 0,
+        "review": 0,
+        "failed": 0
+      }
+    },
+    "reconcile_missing_blob_wrong_hash_recipe": {
+      "exit": 0,
+      "db_exists": true,
+      "report": {
+        "kind": "shadow-reconcile",
+        "documents": 1,
+        "with_snapshot": 1,
+        "with_extraction": 1,
+        "ready": 1,
+        "review": 0,
+        "failed": 0
+      }
+    },
+    "previously_misbound_legacy_time": {
+      "public_available_at": "2026-01-01T00:00:00Z",
+      "july_hits": 1
+    },
+    "same_revision_three_exports": {
+      "files": 2,
+      "expected": 1
+    },
+    "interrupted_revision_two": {
+      "revision_two_files": 2,
+      "expected": 1
+    }
+  },
+  "prior_probe": {
+    "old_db_budget": {
+      "opened": true,
+      "budget_ok": true
+    },
+    "chat_retry_cap": {
+      "cap": 1,
+      "http_attempts": 1,
+      "result": "failed",
+      "accounted_requests": 1
+    },
+    "vision_retry_cap": {
+      "cap": 1,
+      "http_attempts": 1,
+      "accounted_requests": 1
+    },
+    "embedding_success_attempt_lifecycle": {
+      "reservations": [
+        {
+          "kind": "embedding",
+          "status": "settled",
+          "est_input": 18
+        },
+        {
+          "kind": "http-attempt",
+          "status": "released",
+          "est_input": 1
+        }
+      ],
+      "totals": {
+        "input": 5,
+        "requests": 0,
+        "pages": 0
+      }
+    },
+    "legacy_unknown_public_time": {
+      "first_observed_at": null,
+      "public_available_at": null,
+      "july_hits": 0
+    },
+    "unchanged_claim_export": {
+      "revision": 1,
+      "exports": 3,
+      "markdown_files": 2
+    }
+  },
+  "server": {
+    "manifest": {
+      "path": "shadow2/shadow-manifest.json",
+      "sha256": "d25c541a2f144c54d9f5322060006c519c82da6a084ae70d0fecf5dde1af71d4",
+      "samples": 30,
+      "missing_sha": 30,
+      "keys": [
+        "source",
+        "doc_id",
+        "version_id",
+        "sha256",
+        "bytes",
+        "media_type",
+        "stratum",
+        "split"
+      ]
+    },
+    "db": {
+      "snapshots": 30,
+      "extractions": 30,
+      "usage_events": 0
+    },
+    "statuses": [
+      [
+        "ready",
+        28
+      ],
+      [
+        "review",
+        2
+      ]
+    ],
+    "deployed_matches_local": {
+      "app/knowledge/providers.py": true,
+      "tools/shadow-acceptance/shadow_sample.py": true,
+      "tools/shadow-acceptance/shadow_reconcile.py": true
+    },
+    "old_containers": [
+      "research-kb-library|Up 2 days (healthy)",
+      "research-kb-status-collector|Up 2 days",
+      "research-kb-syncthing|Up 3 days (healthy)"
+    ],
+    "blob_check": {
+      "samples": 30,
+      "blob_verified_against_db": 30,
+      "missing_blob": 0,
+      "bad_blob": 0,
+      "manifest_recipe_missing": 30,
+      "distinct_actual_recipes": 1,
+      "manifest_top_keys": [
+        "schema",
+        "seed",
+        "requested",
+        "actual",
+        "coverage",
+        "warnings",
+        "samples"
+      ]
+    }
+  }
+}

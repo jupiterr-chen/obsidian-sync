@@ -1,77 +1,35 @@
-# 旧 research-kb 编排切换到 obsidian-sync 全栈（待用户明确确认后执行）
+# research-kb 基础迁移与可回退切换
 
-目标：一个项目目录、一套编排（`deploy/docker-compose.full.yml`：library + syncthing + status-collector + knowledge-worker + knowledge-api，镜像 `Dockerfile.knowledge` 含锁定依赖与预置 OCR 模型），数据家目录 `/vol2/1000/10.Develop/obsidian-sync`。**Windows 端零改动**：迁移 Syncthing 设备身份与文件夹 ID，`ResearchVault` 文件夹对自动重连。
+2026-10-04：用户已授权迁移、旧栈停机与验证。按最新取舍，先交付保留现有能力的基础迁移；模型分析、public-as-of 历史检索、自动候选写回缺陷后置。以 [任务书 M1–M6](../docs/23-fifth-review-taskbook.md) 为准，不再等待增强能力全部修复或重复停机授权。
 
-## 为什么目前仍在旧目录生成内容
+## 固定目录与实际盘点
 
-旧栈还在生产服役；切换确认前不动它的容器、配置和数据。过渡期 `自动研究候选/` 写入旧 vault 是搭现有同步文件夹对的便车——切换后写回目标改到新 vault，旧目录整体退役。
+- 旧目录：`/vol2/1000/10.Develop/research-kb`；保留，不删除/移动。
+- 新目录：`/vol2/1000/10.Develop/obsidian-sync`；代码位于 `repo`。
+- 2026-10-04只读盘点：旧 library/status-collector/syncthing 三容器仍运行；未发现独立 knowledge worker/run-extracts/shadow_run 进程。
+- 旧 library 将旧项目根挂到 `/data`，原始报告/discord只读；Syncthing把旧 vault挂到`/data`，身份数据在旧`state/syncthing`。
+- 新知识库和快照已经存在，必须保留；新catalog/vault/deploy/config尚不存在。不能用整目录覆盖把新知识库回退成旧状态。
+- 宿主新配置仍引用旧catalog，切换时必须明确改为新catalog路径。不要把容器路径直接用于宿主任务。
 
-## 前置条件（全部满足才执行）
+## 仅保留必要切换门禁
 
-1. 用户明确确认下线旧编排（硬性门槛，另需单独授权才清理旧目录）。
-2. 真实数据核心验收完成：快照/提取/索引全绿 + OCR 回填完成 + `/api/v1` 行为回归 + 评审修复复验通过。
-3. 新目录就绪：`deploy/config/config.json`（容器内路径版）、`deploy/config/knowledge.json`、`deploy/.env`（compose 变量）。
+1. 精确盘点所有写者、配置、端口与挂载；确认没有并发迁移任务。
+2. SQLite backup API 一致性备份，文件/配置/身份备份；生成私有哈希清单，独立目录实际恢复核验。
+3. 新库包含原有版本/快照/索引/记忆/outbox/稿件；人工区和旧证据保留。全量对账不能依赖当前shadow_reconcile退出码。
+4. 新服务可启动，原library/API行为与Windows同步能验证；切换前远程模型关闭，新增自动候选写回暂缓，未验收增强API隔离或限制。
+5. Syncthing设备/文件夹身份与路径一致，无同身份双实例同时运行；新旧Vault有差异时保留两份，不静默覆盖。
+6. 具备保护切换后新写入的回滚步骤。任一基础门禁失败停止切换并精确处理。
 
-## 切换步骤（服务器；全程不删任何旧文件）
+## 执行顺序
 
-```sh
-# 0) 变量与配置检查
-OLD=/vol2/1000/10.Develop/research-kb
-NEW=/vol2/1000/10.Develop/obsidian-sync
-cd $NEW/repo/deploy
-docker compose -f docker-compose.full.yml config >/dev/null && echo "compose config OK"
+先在线备份与隔离恢复、准备新配置和服务，再冻结已核对身份的旧写者，取得最终一致副本并校验复制。停止的是盘点出的准确容器/进程，不使用宽泛pkill。新服务启动后验证旧API、原文与旧证据、普通检索、全量文件/DB对账、Windows同步、人工区hash、增量三连跑和新目录写入。每个阶段保存时间、当前状态与恢复点。
 
-# 1) 冻结所有写者（R13：包括独立回填 worker，保证一致的切换点）
-#    注意：此后所有步骤都显式 cd，不再依赖上一步的工作目录
-pkill -f "knowledge run-extracts" || true          # 后台 OCR 回填
-pkill -f "knowledge worker" || true                # 周期 worker（如已部署）
-cd $OLD/repo && docker compose stop                # 旧栈（保留容器与数据）
+复制前核对目标已有文件，禁止盲目覆盖；不直接复制运行中的SQLite文件作为一致性备份。Syncthing身份/配置只保存在私有备份，禁止打印密钥/API key或提交Git。
 
-# 2) 在线备份 catalog（真实路径，非占位；SQLite backup API，不拷贝 WAL 文件）
-mkdir -p $NEW/catalog $NEW/vault $NEW/state
-python3 - <<'PY'
-import sqlite3
-src = sqlite3.connect("/vol2/1000/10.Develop/research-kb/catalog/catalog.sqlite3")
-dst = sqlite3.connect("/vol2/1000/10.Develop/obsidian-sync/catalog/catalog.sqlite3")
-src.backup(dst); dst.close(); src.close()
-print("catalog online backup done")
-PY
+## 回退
 
-# 3) 复制 vault 与 Syncthing 身份（设备密钥/文件夹 ID → Windows 无感重连）
-cp -a $OLD/vault/. $NEW/vault/            # 含人工区与自动研究候选/
-cp -a $OLD/state/syncthing $NEW/state/
+停止准确的新写者，先保全新库/快照/稿件与人工新增修改，再恢复旧服务和原同步身份。旧数据目录保留；新旧人工差异保留并审计，不能靠覆盖旧目录实现回退。核验旧入口与Windows同步恢复。不能将新旧Syncthing同身份同时启动。
 
-# 4) 容器路径版配置（deploy/config/ 下）：
-#    config/config.json 的 root 用 /archive、/discord，
-#    catalog_db=/data/catalog/catalog.sqlite3（与旧栈相同挂载布局）；
-#    knowledge.json 的 catalog_db=/catalog/catalog.sqlite3（只读挂载）。
-#    S09: writeback.analysis_dir 必须是容器视角路径 /vault/自动研究候选
-#    （worker 容器把 $NEW/vault 挂载为 /vault），不是宿主 $NEW/vault/...；
-#    快照根同理写 /state/snapshots。
+## 收尾
 
-# 5) 起新栈并自检（显式使用绝对路径，任何 cwd 下都可执行）
-cd $NEW/repo/deploy
-docker compose -f docker-compose.full.yml up -d --build
-curl -sS http://192.168.1.150:8765/healthz | python3 -m json.tool
-curl -sS http://127.0.0.1:8766/api/kb/v1/health | python3 -m json.tool
-
-# 6) 切换后写入对账（R13）：观察一个调度周期后的增量是否只落在新目录
-grep -c "knowledge" $NEW/state/ingest.log || true
-ls $NEW/state/knowledge.sqlite3-wal 2>/dev/null && echo "knowledge writers active"
-```
-
-Windows 端确认：Syncthing `ResearchVault` 文件夹显示已连接（同一文件夹 ID、同一设备身份）。
-
-## 回滚（保护切换后产生的新写入，不是零丢失承诺）
-
-1. `cd $NEW/repo/deploy && docker compose -f docker-compose.full.yml down`（不带 -v）。
-2. **先收割切换后新写入**：`$NEW/state`（knowledge 库/快照）、`$NEW/vault/自动研究候选/` 与人工在新生成区的任何编辑——打包保存到回滚备份目录（不删除）。
-3. 把 vault 中切换后的人工编辑按文件同步回旧目录（Syncthing 停摆窗口内的两端改动需要人工合并；冲突文件保留两份）。
-4. `cd $OLD/repo && docker compose up -d`；验收 `/healthz` 与 Windows 重连。
-
-## 注意
-
-- 旧目录退役清理（删除）是**另一次**明确授权，不在本切换内。
-- Syncthing 保持旧栈的关闭全局发现/中继配置（LAN 本地发现 + 显式地址）。
-- 切换窗口选在没有人工编辑 Vault 的时段；切换前冻结写者（步骤 1）确保一致快照点。
-- 回填如未跑完即切换：新栈的 knowledge worker 会按 outbox/任务表继续，幂等可续。
+记录入口、服务归属、备份与恢复目录、校验结果、commit和待观察项。旧目录清理不在本次授权内。不宣称已完成七天观察。G2质量金标准与V01–V04保留在fix清单，在对应增强功能启用前验收。
