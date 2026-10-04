@@ -109,6 +109,18 @@
 
 310 tests OK；shadow2 独立 run 30/30 全成+幂等；G2 待人工标注。
 
+## F0 迁移后 Bug Fix（2026-04-04 基础迁移后，V01-V04+CLI）
+
+|问题|状态|提交|证据|
+|---|---|---|---|
+|V01 成功请求预算|fixed|a2407d1|探针 8/8 + test_f0_fixes（三入口/重启/重试/旧库）|
+|V02 影子校验|fixed|a2407d1|manifest sha+recipe 锁定；reconcile 只读严格（缺数据 NOT_RUN/问题 FAIL）|
+|V03 历史时间|fixed（生产无需修）|a2407d1|sync 自愈+审计工具；生产审计 0 误填行（528 全 null）|
+|V04 写回幂等|fixed|a2407d1|同 revision 单产物；中断收养；人工编辑保留|
+|CLI snapshot_root|fixed|a2407d1|serve-kb 传配置路径，任意 cwd 快照哈希核验|
+
+324 tests OK；探针 ALL-PASS；生产零改动（修复随下次发布上线）。F0 完成→接 docs/25 A 阶段。
+
 ## 记录
 
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。

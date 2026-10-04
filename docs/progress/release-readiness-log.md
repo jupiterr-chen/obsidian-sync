@@ -84,3 +84,22 @@
 
 - shadow2 的 30 份人工标注（A04/A06/A08/A09 金标准）未开始 → NOT_RUN。
 - 全量/切换待上述+用户启动指令（停机授权已有，条件未满足前不动旧栈）。
+
+## F0 迁移后 Bug Fix（2026-10-04，V01-V04 + CLI snapshot_root）
+
+基线 `b38f333`（迁移后）；评审依据 `FIFTH-REVIEW-20261004.md`；回归载体 `app/tests/test_f0_fixes.py`（13 项断言，基线 9 RED）；探针 `fifth-review-probe-20261004.py` 逐字重跑 **ALL-PASS（8/8）**。提交 `a2407d1`。
+
+| 问题 | RED | GREEN |
+|---|---|---|
+| V01 成功请求不计预算 | 三入口 cap=1 连续成功两次、requests=0 | 物理尝试=上限单位（重试需自有槽位）；业务预留 settle/unknown 持久化为请求记录；连续成功/跨重启/超时重试/坏响应/旧库升级全覆盖 |
+| V02 manifest/对账不严 | sha256 30/30 缺失；空 state/缺 blob/错 hash/错 recipe 均 exit 0 | 选样 SELECT 带 sha256 且缺哈希拒绝出 manifest；manifest 锁定 expected_extraction_digest；reconcile 严格只读（mode=ro 不建库）逐份核验 blob 大小/哈希/recipe，问题=exit 1，缺数据=NOT_RUN exit 2 |
+| V03 误填时间未修 | 误填库重同步保留 1 月日期、7 月命中 | sync 自愈（继承基线无版本证据→重算归 unknown，显式版本证据保留）；time_audit.py 只读审计+幂等修正（保留前值/原因/证据）。**生产只读审计：528 行 basis 全 null，0 误填——从未污染生产** |
+| V04 写回首次重复+中断 | 同 revision 三导出 2 文件；中断重试 2 份 revision2 | 渲染时间取 claim 固定 updated_at（同 revision 字节稳定→重导出纯 no-op）；首次发布登记业务身份；人工编辑恰 1 候选；候选文件名含稳定标记（中断孤儿可被收养并登记） |
+| CLI snapshot_root | serve-kb 未传配置路径（迁移时以 working_dir 规避） | 显式传 config.snapshot_root；任意 cwd 端到端快照哈希核验通过（既有容器 working_dir 规避继续有效） |
+
+最终回归 **324 tests OK（2 skipped）**。生产状态：新四容器 healthy、旧栈停止；V01 无孤儿预留；无生产数据修改（本轮零部署变更，修复待下次发布随新镜像上线——见 F0-5 根治后仍保留 working_dir 设置至新发布验证）。
+
+### F0 边界（按任务书）
+
+- 一次性阅读副本导出的 CRLF/NUL 处理作为回归保持（test_fourth_review 阅读路径测试继续通过），未扩大重构。
+- F0 通过≠自动解析/分析上线；下一步接 docs/25 的 A 阶段。

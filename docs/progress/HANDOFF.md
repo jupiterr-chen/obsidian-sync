@@ -42,6 +42,11 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-04（晚）F0 迁移后 Bug Fix 完成（V01-V04+CLI，探针 ALL-PASS）
+
+- 第五轮 V01-V04 + CLI snapshot_root 全部修复（`a2407d1`，324 tests，探针 8/8）。**生产零改动**：只读审计确认 V03 误填从未发生（生产 528 版本 basis 全 null）、V01 无孤儿预留；新四容器 healthy、旧栈停止。修复代码未部署（随下次发布上线；knowledge-api 的 working_dir 规避继续有效）。
+- 下一步：docs/25 的 A 阶段（自动解析/阅读）。F0/一次性导出≠自动解析上线。
+
 ## 2026-10-04 第四轮修复完成（U01-U05，探针+服务器实测）
 
 - 第四轮复核 → 全部修复（`6a2e57d`）：旧库迁移在**生产库副本**上实际运行业务通过；三 provider 入口统一 attempt 门禁；legacy NULL 不绑定；claim 导出幂等；影子链封闭（manifest hash/生产路径拒绝/强制禁外发——shadow2 全程 usage_events=0）。
