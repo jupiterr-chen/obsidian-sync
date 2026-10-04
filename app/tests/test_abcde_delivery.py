@@ -18,6 +18,12 @@ def _kb():
     return KnowledgeStore(os.path.join(temp_dir(), "k.sqlite3"))
 
 
+def _kb_from_path(path):
+    from knowledge.store import KnowledgeStore
+
+    return KnowledgeStore(path)
+
+
 def _seed_version(kb, doc_id="D1", version_id="v1", sha="a", current=True):
     stamp = "2026-10-04T00:00:00Z"
     kb.upsert_documents([{
@@ -107,6 +113,65 @@ class A1IncrementalRegistrationTest(unittest.TestCase):
         self.assertTrue(first["ok"] and second["ok"])
         self.assertEqual(second["extracts"]["processed"], 0,
                          "restart reprocessed extracts")
+
+
+    def test_worker_cycle_with_vault_publishes_and_heals_crash_gap(self):
+        """The reading section must run inside a real cycle with vault_dir
+        configured (the first deployment crashed it: SELECT extraction_id
+        FROM jobs - a column that does not exist). Reconciliation must
+        also heal the crash gap: extraction done but publish never
+        enqueued must publish on the NEXT cycle, not age out."""
+        from knowledge.config import KnowledgeConfig
+        from knowledge.worker import run_cycle
+        from fixtures import make_config
+        from library.ingest import Ingestor
+
+        tmp = temp_dir()
+        lib_cfg, _, _ = make_config(tmp)
+        Ingestor(lib_cfg).run()
+        Ingestor(lib_cfg).close()
+        vault = os.path.join(tmp, "vault-out")
+        os.makedirs(vault, exist_ok=True)
+        cfg = KnowledgeConfig(
+            catalog_db=lib_cfg.catalog_db,
+            knowledge_db=os.path.join(tmp, "state", "knowledge.sqlite3"),
+            snapshot_root=os.path.join(tmp, "state", "snaps"),
+            library_config="unused",
+            extra={"vault_dir": vault,
+                   "public_base_url": "http://127.0.0.1:8765"})
+        first = run_cycle(cfg, lib_cfg)
+        self.assertTrue(first["ok"], first.get("error"))
+        self.assertNotEqual(
+            (first.get("reading") or {}).get("reason"),
+            "vault_dir not configured", first.get("reading"))
+        reading_dir = os.path.join(vault, "解析正文")
+        for page in ("开始阅读.md", "处理状态.md"):
+            self.assertTrue(os.path.exists(os.path.join(reading_dir, page)),
+                            page + " not published")
+
+        # simulate the production incident: extraction committed, the
+        # publish step never ran (crash) -> no outbox rows, no files
+        kb = _kb_from_path(cfg.knowledge_db)
+        try:
+            with kb._tx() as conn:
+                conn.execute("DELETE FROM publish_outbox")
+        finally:
+            kb.close()
+        for name in os.listdir(reading_dir):
+            os.remove(os.path.join(reading_dir, name))
+
+        healed = run_cycle(cfg, lib_cfg)
+        self.assertTrue(healed["ok"], healed.get("error"))
+        self.assertGreaterEqual(
+            healed["reading"].get("enqueued", 0), 1,
+            "done extractions with no outbox row were not re-enqueued")
+        for page in ("开始阅读.md", "处理状态.md"):
+            self.assertTrue(os.path.exists(os.path.join(reading_dir, page)),
+                            page + " not republished after heal")
+        # steady state: nothing left to reconcile
+        third = run_cycle(cfg, lib_cfg)
+        self.assertTrue(third["ok"], third.get("error"))
+        self.assertEqual(third["reading"].get("enqueued", 0), 0)
 
 
 class A2RepairQueueTest(unittest.TestCase):

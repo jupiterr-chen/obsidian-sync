@@ -320,6 +320,10 @@ def idempotency_key(source: str, doc_id: str, version_id: str, stage: str,
 POST_MIGRATION_INDEXES = (
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_reservation"
     " ON usage_events(reservation_id) WHERE reservation_id IS NOT NULL",
+    # A3: publish identity - one outbox row per (source, doc, version,
+    # extraction) so crash-healing re-enqueues can never duplicate
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_publish_outbox_identity"
+    " ON publish_outbox(source, doc_id, version_id, extraction_id)",
 )
 
 SCHEMA_VERSION = 2

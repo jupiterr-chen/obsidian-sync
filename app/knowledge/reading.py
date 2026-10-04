@@ -105,13 +105,16 @@ class ReadingPublisher:
 
     # ------------------------------------------------------------ outbox
     def enqueue(self, source: str, doc_id: str, version_id: str,
-                extraction_id: str) -> None:
+                extraction_id: str) -> bool:
+        """Idempotent: the unique identity index collapses re-enqueues
+        (crash healing, worker restarts) into one pending row."""
         with self.kb._tx() as conn:
-            conn.execute(
-                "INSERT INTO publish_outbox (source, doc_id, version_id,"
-                " extraction_id, status, created_at)"
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO publish_outbox (source, doc_id,"
+                " version_id, extraction_id, status, created_at)"
                 " VALUES (?,?,?,?, 'pending', ?)",
                 (source, doc_id, version_id, extraction_id, utc_now()))
+            return cursor.rowcount > 0
 
     def pending(self, limit: int = 200) -> List[Dict[str, Any]]:
         with self.kb._lock:

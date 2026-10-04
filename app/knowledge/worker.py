@@ -130,16 +130,42 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                     kb, vault_dir,
                     (config.extra or {}).get(
                         "public_base_url", "http://192.168.1.150:8765"))
-                with kb._tx() as conn:
-                    done = conn.execute(
-                        "SELECT source, doc_id, version_id, extraction_id"
-                        " FROM jobs WHERE stage='extract' AND status='done'"
-                        " AND updated_at >= ?", (cycle["started_at"],)).fetchall()
-                    for row in done:
-                        publisher.enqueue(row["source"], row["doc_id"],
-                                          row["version_id"],
-                                          None or _extraction_for(kb, row))
+                # Reconcile, do not window: every current version whose
+                # LATEST extraction has no outbox row yet is (re)enqueued.
+                # Identity includes the extraction, so a re-OCR (new
+                # extraction, same version) republishes and the index
+                # switches - and work that finished while the worker was
+                # down (crash between extraction and publish) is picked
+                # up instead of aging out of a started_at window. The
+                # unique index makes re-enqueues no-ops.
+                with kb._lock:
+                    due = kb._conn.execute(
+                        "SELECT DISTINCT j.source, j.doc_id, j.version_id"
+                        " FROM jobs j"
+                        " JOIN kb_versions v ON v.source=j.source"
+                        " AND v.doc_id=j.doc_id AND v.version_id=j.version_id"
+                        " AND v.is_current=1"
+                        " WHERE j.stage='extract' AND j.status='done'"
+                        " AND EXISTS (SELECT 1 FROM extractions e"
+                        " WHERE e.source=j.source AND e.doc_id=j.doc_id"
+                        " AND e.version_id=j.version_id AND e.rowid ="
+                        " (SELECT MAX(e2.rowid) FROM extractions e2"
+                        "  WHERE e2.source=e.source AND e2.doc_id=e.doc_id"
+                        "  AND e2.version_id=e.version_id)"
+                        " AND NOT EXISTS (SELECT 1 FROM publish_outbox p"
+                        " WHERE p.source=e.source AND p.doc_id=e.doc_id"
+                        " AND p.version_id=e.version_id"
+                        " AND p.extraction_id=e.extraction_id))"
+                    ).fetchall()
+                enqueued = 0
+                for row in due:
+                    extraction_id = _extraction_for(kb, row)
+                    if extraction_id and publisher.enqueue(
+                            row["source"], row["doc_id"], row["version_id"],
+                            extraction_id):
+                        enqueued += 1
                 cycle["reading"] = publisher.consume()
+                cycle["reading"]["enqueued"] = enqueued
             else:
                 cycle["reading"] = {"skipped": True,
                                     "reason": "vault_dir not configured"}
