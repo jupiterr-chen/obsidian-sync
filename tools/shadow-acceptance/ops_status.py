@@ -32,7 +32,7 @@ def snapshot(config: KnowledgeConfig) -> dict:
             "SELECT COUNT(*) c FROM kb_versions WHERE is_current=1").fetchone()["c"]
         ready = conn.execute(
             "SELECT COUNT(*) c FROM extractions e WHERE e.status='ready' AND"
-            " e.extraction_id IN (SELECT MAX(rowid) FROM extractions GROUP BY"
+            " e.rowid IN (SELECT MAX(rowid) FROM extractions GROUP BY"
             " source, doc_id, version_id)").fetchone()["c"]
         report["extractions_ready"] = ready
         report["publish_outbox"] = {r["status"]: r["c"] for r in conn.execute(
