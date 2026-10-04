@@ -45,6 +45,25 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "empty manifest"}))
         return 1
 
+    # U05: hard isolation FIRST - a state-dir at/inside the production
+    # state or equal to any configured production path is refused BEFORE
+    # any probe or write
+    prod_state = os.path.realpath(
+        os.path.join(os.path.dirname(base), "state"))
+    state_real = os.path.realpath(args.state_dir)
+    production_paths = [prod_state,
+                        os.path.realpath(config.snapshot_root),
+                        os.path.dirname(os.path.realpath(config.knowledge_db))]
+    for forbidden in production_paths:
+        if state_real == forbidden or state_real.startswith(
+                forbidden + os.sep):
+            print(json.dumps({
+                "ok": False,
+                "error": "refusing shadow state dir at/inside production"
+                         " path %r" % forbidden,
+            }))
+            return 3
+
     # connectivity probe of the read-only sources
     from knowledge.sync import open_catalog_readonly
 
@@ -73,13 +92,22 @@ def main() -> int:
         return 0
 
     # real isolated run: dedicated knowledge db + snapshot root
+    # U05: shadow runs DISABLE all model egress regardless of the
+    # production config - local OCR only, no vision fallback, no chat
+    shadow_extra = json.loads(json.dumps(config.extra))
+    providers = shadow_extra.get("providers") or {}
+    for key in list(providers):
+        providers[key] = {**providers[key], "egress_allowed": False}
+    shadow_extra["providers"] = providers
+    shadow_extra.setdefault("ocr", {})
+    shadow_extra["ocr"] = {**shadow_extra["ocr"], "fallback": None}
     shadow_config = KnowledgeConfig(
         catalog_db=config.catalog_db,
         knowledge_db=os.path.join(args.state_dir, "knowledge.sqlite3"),
         snapshot_root=os.path.join(args.state_dir, "snapshots"),
         library_config=config.library_config,
         register_stages=("snapshot", "extract"),
-        extra=config.extra,
+        extra=shadow_extra,
     )
     from library.config import Config
     from knowledge.jobs import JobRunner

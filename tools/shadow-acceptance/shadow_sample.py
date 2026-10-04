@@ -16,6 +16,7 @@ Usage (server, isolated dir):
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -113,15 +114,23 @@ def main() -> int:
     annotations_dir = os.path.join(args.out_dir, "annotations")
     os.makedirs(annotations_dir, exist_ok=True)
     index_lines = ["# 影子标注清单", ""]
+    created = preserved = 0
     for sample in plan["samples"]:
         safe = "%s_%s" % (sample["source"], sample["doc_id"])
         path = os.path.join(annotations_dir, safe + ".md")
-        with open(path, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(ANNOTATION_TEMPLATE.format(
-                doc_id=sample["doc_id"], stratum=sample["stratum"],
-                split=sample["split"], source=sample["source"],
-                version_id=sample["version_id"], system_status="NOT_PROCESSED",
-                ocr_pages="NOT_PROCESSED", ocr_status="NOT_PROCESSED"))
+        # U05: existing annotation files are HUMAN GOLD - never truncated
+        # or rewritten; only first creation writes the template
+        if os.path.exists(path):
+            preserved += 1
+        else:
+            with open(path, "x", encoding="utf-8", newline="\n") as handle:
+                handle.write(ANNOTATION_TEMPLATE.format(
+                    doc_id=sample["doc_id"], stratum=sample["stratum"],
+                    split=sample["split"], source=sample["source"],
+                    version_id=sample["version_id"],
+                    system_status="NOT_PROCESSED",
+                    ocr_pages="NOT_PROCESSED", ocr_status="NOT_PROCESSED"))
+            created += 1
         index_lines.append("- [%s/%s (%s)](annotations/%s.md)"
                            % (sample["source"], sample["doc_id"],
                               sample["split"], safe + ".md"))
@@ -129,8 +138,14 @@ def main() -> int:
               encoding="utf-8", newline="\n") as handle:
         handle.write("\n".join(index_lines) + "\n")
 
+    # U05: manifest self-hash pins the run identity for reconciliation
+    with open(manifest_path, encoding="utf-8") as handle:
+        manifest_hash = hashlib.sha256(
+            handle.read().encode("utf-8")).hexdigest()
     print(json.dumps({
         "ok": True, "manifest": manifest_path,
+        "manifest_hash": manifest_hash,
+        "annotations_created": created, "annotations_preserved": preserved,
         "total": plan["actual"]["total"],
         "tune": plan["actual"]["tune"], "blind": plan["actual"]["blind"],
         "strata": plan["coverage"], "warnings": plan["warnings"],

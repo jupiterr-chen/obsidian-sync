@@ -88,12 +88,19 @@ def _exclusive_create(path: str, content: str) -> bool:
     return True
 
 
-def _content_identity(directory: str, name: str, content: str) -> str:
-    """T07: stable identity for a candidate = target name + content hash.
+CANDIDATE_TEMPLATE_VERSION = "claim-candidate-v1"
 
-    Random suffixes made every export of the SAME content a new file; the
-    identity is deterministic so repeat deliveries are recognized and
-    published exactly once (manifest-tracked)."""
+
+def _content_identity(directory: str, name: str, content: str,
+                      stable_id: Optional[str] = None) -> str:
+    """T07/U04: identity for a candidate.
+
+    With stable_id (a business identity such as claim_id/revision/template
+    version) the identity is INDEPENDENT of the rendered bytes - timestamps
+    inside the render no longer multiply files. Without stable_id it falls
+    back to the content hash (unchanged T07 behavior for raw writes)."""
+    if stable_id:
+        return "%s.%s" % (name, stable_id)
     return "%s.%s" % (name, _sha256_text(content)[:16])
 
 
@@ -103,12 +110,14 @@ def _candidate_for_identity(directory: str, identity: str) -> Optional[str]:
     return entry if entry and os.path.isfile(entry) else None
 
 
-def _unique_candidate(directory: str, name: str, content: str) -> str:
-    """R10/T07: append-only candidate with DETERMINISTIC identity (name +
-    content hash): identical content re-delivered finds its existing file
-    (idempotent, no new copy); genuinely new content gets a fresh file
-    stamped with the publish time. No candidate is ever overwritten."""
-    identity = _content_identity(directory, name, content)
+def _unique_candidate(directory: str, name: str, content: str,
+                      stable_id: Optional[str] = None) -> str:
+    """R10/T07/U04: append-only candidate with DETERMINISTIC identity
+    (stable business id, or content hash for raw writes): identical
+    re-delivery finds its existing file (idempotent); genuinely new content
+    gets a fresh file stamped with the publish time. No candidate is ever
+    overwritten."""
+    identity = _content_identity(directory, name, content, stable_id)
     existing = _candidate_for_identity(directory, identity)
     if existing is not None:
         return existing  # same content already published exactly once
@@ -126,7 +135,8 @@ def _unique_candidate(directory: str, name: str, content: str) -> str:
 
 
 def write_candidate(directory: str, name: str, content: str,
-                    owner: str = "knowledge") -> Dict[str, Any]:
+                    owner: str = "knowledge",
+                    stable_id: Optional[str] = None) -> Dict[str, Any]:
     """Write or refresh one generated file under a registered directory.
 
     Returns the outcome: written | unchanged | preserved_with_candidate.
@@ -156,14 +166,16 @@ def write_candidate(directory: str, name: str, content: str,
                 with open(target, "r", encoding="utf-8") as handle:
                     if _sha256_text(handle.read()) == new_hash:
                         return {"outcome": "unchanged", "path": target}
-            identity = _content_identity(directory, name, content)
+            identity = _content_identity(directory, name, content,
+                                          stable_id=stable_id)
             already = _candidate_for_identity(directory, identity)
             if already is not None:
-                # T07: this exact content was already delivered beside the
-                # main file - publish once, never duplicate
+                # T07/U04: this business revision was already delivered
+                # beside the main file - publish once, never duplicate
                 return {"outcome": "unchanged", "path": target,
                         "candidate_path": already}
-            candidate = _unique_candidate(directory, name, content)
+            candidate = _unique_candidate(directory, name, content,
+                                          stable_id=stable_id)
             return {"outcome": "preserved_with_candidate", "path": target,
                     "candidate_path": candidate}
         # first creation: exclusive create; a losing racer falls back to a
@@ -232,9 +244,11 @@ def export_claim_candidates(kb: KnowledgeStore, directory: str,
                 row = kb.get_block_with_identity(block_id)
                 evidence_texts[block_id] = row["text"] if row else ""
         name = "%s.md" % claim["claim_id"]
+        stable_id = "rev%d.%s" % (claim["current_revision"],
+                                  CANDIDATE_TEMPLATE_VERSION)
         results.append(write_candidate(
             directory, name, render_claim_candidate(claim, evidence_texts),
-            owner=owner))
+            owner=owner, stable_id=stable_id))
     outcomes = {r["outcome"] for r in results}
     return {"count": len(results), "outcomes": sorted(outcomes), "results": results}
 

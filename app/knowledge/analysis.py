@@ -266,14 +266,21 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
             return {"run_id": run_id, "status": "failed",
                     "error": "budget_exceeded_per_run_input_tokens",
                     "retryable": False}
+        # U02: when the chat provider carries the per-attempt gate, physical
+        # attempts are the request unit - the business reservation covers
+        # tokens only (mirrors the embedding path)
+        gated_chat = hasattr(chat, "attempt_ledger")
         try:
             reservation = ledger.reserve("chat", estimated_input,
-                                         run_id=run_id)
+                                         run_id=run_id,
+                                         count_request=not gated_chat)
         except BudgetExceeded as exc:
             code = str(exc).split(":")[0]
             kb.update_analysis_run(run_id, status="failed", error=code)
             return {"run_id": run_id, "status": "failed", "error": code,
                     "retryable": False}
+        if gated_chat:
+            chat.attempt_ledger = ledger
         try:
             draft, usage = chat.complete(prompt)
         except EgressNotAllowed:

@@ -159,7 +159,7 @@ class S02WritebackAppendOnlyTest(unittest.TestCase):
 
         original_unique = wb._unique_candidate
 
-        def racing_candidate(directory, name, content):
+        def racing_candidate(directory, name, content, stable_id=None):
             # external editor writes the main file while the export is
             # deciding what to publish
             if not gate.is_set():

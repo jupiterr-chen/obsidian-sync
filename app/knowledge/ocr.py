@@ -145,14 +145,23 @@ class VisionApiOcr(OcrEngine):
                 raise OcrEngineError(
                     "budget_exceeded_per_page: page estimate %d > cap %d"
                     % (self.page_token_cap, ceiling))
+            # U02: when the provider is attempt-gated, physical attempts
+            # are the request unit; the page reservation counts a PAGE but
+            # not an extra request (mirrors chat/embedding)
+            gated = hasattr(self.chat_provider, "attempt_ledger")
             try:
                 reservation = self.ledger.reserve(
-                    "vision-page", self.page_token_cap, counts_as_page=True)
+                    "vision-page", self.page_token_cap, counts_as_page=True,
+                    count_request=not gated)
             except BudgetExceeded as exc:
                 raise OcrEngineError(str(exc))
         prompt = ("Transcribe ALL text in this document page image. Keep the "
                   "original language (Chinese/English mixed as-is). Output "
                   "plain text only, no commentary.")
+        # U02: gate the provider's physical attempts with the same ledger
+        if self.ledger is not None and hasattr(self.chat_provider,
+                                               "attempt_ledger"):
+            self.chat_provider.attempt_ledger = self.ledger
         try:
             text, usage = self.chat_provider.complete_with_image(
                 prompt, image_bytes, mime="image/png", max_output_tokens=4000)

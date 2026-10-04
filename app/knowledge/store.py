@@ -344,6 +344,7 @@ class KnowledgeStore:
             ("kb_versions", "public_available_at", "TEXT"),
             ("kb_versions", "public_time_basis", "TEXT"),
             ("usage_events", "reservation_id", "INTEGER"),
+            ("usage_events", "counts_request", "INTEGER NOT NULL DEFAULT 1"),
             ("budget_reservations", "counts_request",
              "INTEGER NOT NULL DEFAULT 1"),
             ("kb_documents", "revision", "INTEGER NOT NULL DEFAULT 1"),
@@ -454,23 +455,31 @@ class KnowledgeStore:
                         (row["source"], row["doc_id"],
                          row["version_id"])).fetchone()
                     row_first = None
-                    if stored and stored["first_observed_at"]:
+                    row_known = False
+                    if stored is not None:
+                        # existing row: its recorded first observation, or
+                        # explicitly UNKNOWN (legacy NULL) - unknown is a
+                        # missing-evidence state, never a license to bind
                         row_first = stored["first_observed_at"]
-                    elif not stored:
+                        row_known = True
+                    else:
                         row_first = (row.get("first_observed_at")
                                      or row.get("synced_at")
                                      or synced_at)
-                    if doc_published and (not row_first or doc_published >= row_first):
+                        row_known = row_first is not None
+                    if (doc_published and row_known and row_first
+                            and doc_published >= row_first):
                         # publication evidence is not OLDER than the
-                        # version's first observation -> it can describe it
+                        # version's KNOWN first observation -> it can
+                        # describe it (unknown/NULL never binds)
                         public_at = doc_published
                         public_basis = "published_at"
-                    elif doc_filed and (not row_first or doc_filed >= row_first):
+                    elif (doc_filed and row_known and row_first
+                          and doc_filed >= row_first):
                         public_at = doc_filed
                         public_basis = "filing_date"
                     else:
-                        # document dates predate this version: they prove
-                        # nothing about the revision -> unknown
+                        # no usable evidence for THIS version -> unknown
                         public_at, public_basis = None, "unknown"
                 conn.execute(
                     "INSERT INTO kb_versions ("
@@ -483,9 +492,8 @@ class KnowledgeStore:
                     "  rel_path=excluded.rel_path, synced_at=excluded.synced_at,"
                     "  public_available_at=COALESCE(excluded.public_available_at,"
                     "    public_available_at),"
-                    "  public_time_basis=CASE WHEN excluded.public_available_at"
-                    "    IS NOT NULL THEN excluded.public_time_basis"
-                    "    ELSE public_time_basis END",
+                    "  public_time_basis=COALESCE(public_time_basis,"
+                    "    excluded.public_time_basis, 'unknown')",
                     (
                         row["source"], row["doc_id"], row["version_id"],
                         row.get("sha256"), row.get("bytes"), row.get("media_type"),

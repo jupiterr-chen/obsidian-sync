@@ -100,10 +100,11 @@ class _HttpProvider:
         body = json_mod.dumps(payload, ensure_ascii=False).encode("utf-8")
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
-            self._gate_attempt()  # T02: retries are gated too
+            attempt_rid = self._gate_attempt()  # U02: gated + closable
             try:
-                return self._transport(url, body)
+                result = self._transport(url, body)
             except urllib.error.HTTPError as exc:
+                self._close_attempt(attempt_rid, dispatched=True)
                 detail = ""
                 try:
                     detail = exc.read().decode("utf-8", errors="replace")[:300]
@@ -115,12 +116,34 @@ class _HttpProvider:
                     retryable=retryable)
                 if not retryable or attempt >= self.max_retries:
                     raise last_error
+                continue
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                self._close_attempt(attempt_rid, dispatched=True)
                 last_error = ProviderCallError(
                     "transport error on %s: %s" % (path, exc), retryable=True)
                 if attempt >= self.max_retries:
                     raise last_error
+                continue
+            # success: token accounting lives on the caller's business
+            # reservation; the attempt slot is freed without charge
+            self._close_attempt(attempt_rid, dispatched=False)
+            return result
         raise last_error or ProviderCallError("unreachable", retryable=True)
+
+    def _close_attempt(self, attempt_rid: int, dispatched: bool) -> None:
+        """U02: bring one physical attempt to an explainable terminal state.
+
+        dispatched=True (request went out, answer failed/ambiguous): the
+        attempt may have been billed -> fail_unknown (1-token estimate).
+        dispatched=False (clean success): release, tokens settle on the
+        business reservation. Never leaves an open 'reserved' row."""
+        ledger = getattr(self, "attempt_ledger", None)
+        if not attempt_rid or ledger is None:
+            return
+        if dispatched:
+            ledger.fail_unknown(attempt_rid)
+        else:
+            ledger.release(attempt_rid)
 
     def _transport(self, url: str, body: bytes) -> Dict[str, Any]:
         """One physical HTTP POST (override seam for tests/transport layers)."""
@@ -132,17 +155,20 @@ class _HttpProvider:
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             return json.loads(response.read().decode("utf-8"))
 
-    def _gate_attempt(self) -> None:
-        """T02: every PHYSICAL attempt - including internal retries - passes
-        the request gate; a budget rejection aborts before any bytes go."""
+    def _gate_attempt(self) -> int:
+        """T02/U02: every PHYSICAL attempt - including internal retries -
+        passes the request gate and returns its reservation id so the call
+        site can close it (success -> release: token accounting lives on
+        the business reservation; transport failure -> fail_unknown)."""
         if getattr(self, "attempt_ledger", None) is not None:
             from .budget import BudgetExceeded
 
             try:
-                self.attempt_ledger.reserve("http-attempt", 1)
+                return self.attempt_ledger.reserve("http-attempt", 1)
             except BudgetExceeded:
                 raise ProviderCallError(
                     "request budget exhausted before attempt", retryable=False)
+        return 0
 
     def _require_egress(self) -> None:
         if not self.egress_allowed:
