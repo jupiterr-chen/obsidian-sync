@@ -470,11 +470,14 @@ class KbApi:
 
     def build_background_package(self, entity_type: str, entity_id: str,
                                  as_of: Optional[str] = None,
-                                 as_of_mode: str = "system") -> Dict[str, Any]:
+                                 as_of_mode: str = "system",
+                                 limit: int = 50) -> Dict[str, Any]:
         from .background import build_background_package
 
-        return build_background_package(self.kb, entity_type, entity_id,
-                                        as_of=as_of, as_of_mode=as_of_mode)
+        return build_background_package(
+            self.kb, entity_type, entity_id, as_of=as_of,
+            as_of_mode=as_of_mode,
+            limit=max(1, min(int(limit), 200)))
 
     # ---------------------------------------------------------------- memory
     def list_claims(self, status: Optional[str] = None) -> Dict[str, Any]:
@@ -659,13 +662,12 @@ class Handler(BaseHTTPRequestHandler):
                     raise KbApiError(400, "invalid_entity",
                                      "entity_type (company|topic) and"
                                      " entity_id are required")
-                from .background import build_background_package
-
-                package = build_background_package(
-                    self.kb, entity_type, entity_id,
+                package = self.api.build_background_package(
+                    entity_type, entity_id,
                     as_of=(body.get("filters") or {}).get("as_of"),
                     as_of_mode=(body.get("filters") or {}).get(
-                        "as_of_mode", "system"))
+                        "as_of_mode", "system"),
+                    limit=body.get("limit") or 50)
                 return self._send(200, package, head_only)
 
             if route[:1] == ["memory-proposals"] and len(route) == 3 \

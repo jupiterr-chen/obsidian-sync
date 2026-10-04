@@ -20,7 +20,8 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("sync", "run-snapshots", "run-extracts", "rebuild-index",
                  "serve-kb", "worker", "status", "sample", "measure",
-                 "evidence-links", "export-analysis", "repair-queue"):
+                 "evidence-links", "export-analysis", "repair-queue",
+                 "publish-reading", "ops-status"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
         if name in ("run-snapshots", "run-extracts"):
@@ -38,6 +39,14 @@ def main(argv=None) -> int:
                                help="bounded repair queue size (A2)")
             child.add_argument("--register", action="store_true",
                                help="register extract jobs for the queue")
+        if name == "publish-reading":
+            child.add_argument("--vault-dir", required=True,
+                               help="vault root containing 解析正文/")
+            child.add_argument("--limit", type=int, default=200,
+                               help="consume at most N pending publishes")
+        if name == "ops-status":
+            child.add_argument("--hours", type=int, default=24,
+                               help="failure window (E)")
         if name == "evidence-links":
             child.add_argument("--source", required=True)
             child.add_argument("--doc-id", required=True)
@@ -145,6 +154,59 @@ def main(argv=None) -> int:
                      "version_id": i["version_id"],
                      "extraction_status": i["extraction_status"],
                      "readable_blocks": i["readable"]} for i in queue]}
+        finally:
+            kb.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "publish-reading":
+        from .reading import ReadingPublisher
+        from .store import KnowledgeStore
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            publisher = ReadingPublisher(
+                kb, args.vault_dir,
+                base_url=(config.extra.get("public_base_url")
+                          or "http://192.168.1.150:8765"))
+            result = publisher.consume(limit=args.limit)
+        finally:
+            kb.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if result.get("published", 0) >= 0 else 1
+    if args.command == "ops-status":
+        from .store import KnowledgeStore
+        import sqlite3
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            def q(sql, params=()):
+                return kb.conn.execute(sql, params).fetchall()
+
+            jobs = q("SELECT stage, status, COUNT(*) c FROM jobs"
+                     " GROUP BY stage, status ORDER BY stage, status")
+            window = "%d hours" % args.hours
+            failed = q("SELECT stage, COUNT(*) c FROM jobs"
+                       " WHERE status='failed' AND updated_at >="
+                       " datetime('now', ?) GROUP BY stage",
+                       ('-%d hours' % args.hours,))
+            outboxes = {}
+            for table in ("publish_outbox", "impact_outbox",
+                          "summary_outbox"):
+                try:
+                    row = q("SELECT status, COUNT(*) c FROM %s"
+                            " GROUP BY status" % table)
+                    outboxes[table] = {r["status"]: r["c"] for r in row}
+                except sqlite3.OperationalError:
+                    outboxes[table] = "missing"
+            gen = q("SELECT id, status, built_at, documents FROM"
+                    " index_generations ORDER BY id DESC LIMIT 1")
+            result = {"ok": True, "window": window,
+                      "jobs": [{"stage": r["stage"], "status": r["status"],
+                                "count": r["c"]} for r in jobs],
+                      "failed_window": [{"stage": r["stage"],
+                                         "count": r["c"]} for r in failed],
+                      "outboxes": outboxes,
+                      "active_generation": dict(gen[0]) if gen else None}
         finally:
             kb.close()
         print(json.dumps(result, ensure_ascii=False, indent=2))

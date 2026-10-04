@@ -281,6 +281,69 @@ class DBackgroundPackageTest(unittest.TestCase):
         finally:
             kb.close()
 
+    def test_background_package_real_http_route(self):
+        # RED regression: the Handler route must go through self.api, not
+        # self.kb (which only exists on KbApi) - before the fix this
+        # endpoint answered 500 internal_error over real HTTP while the
+        # direct-call test above stayed green
+        import json
+        import socket
+        import threading
+        import urllib.error
+        import urllib.request
+
+        from knowledge.kbapi import build_kb_server
+
+        kb = _kb()
+        server = None
+        try:
+            _seed_version(kb, "ROUTE1")
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                port = probe.getsockname()[1]
+            server = build_kb_server(kb, {"route-token": ["research.read"]},
+                                     host="127.0.0.1", port=port)
+            thread = threading.Thread(target=server.serve_forever,
+                                      kwargs={"poll_interval": 0.05},
+                                      daemon=True)
+            thread.start()
+
+            def post(path, token, body):
+                req = urllib.request.Request(
+                    "http://127.0.0.1:%d%s" % (port, path),
+                    data=json.dumps(body).encode("utf-8"), method="POST")
+                req.add_header("Authorization", "Bearer %s" % token)
+                req.add_header("Content-Type", "application/json")
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        return resp.status, json.loads(
+                            resp.read().decode("utf-8"))
+                except urllib.error.HTTPError as exc:
+                    return exc.code, json.loads(exc.read().decode("utf-8"))
+
+            status, payload = post(
+                "/api/kb/v1/background-package", "route-token",
+                {"entity_type": "company", "entity_id": "EX",
+                 "filters": {"as_of_mode": "system"}, "limit": 5})
+            self.assertEqual(status, 200, payload)
+            self.assertEqual(payload["entity"]["id"], "EX")
+            self.assertIn("result_digest", payload)
+            # invalid entity type is a 400, not a 500
+            status, payload = post(
+                "/api/kb/v1/background-package", "route-token",
+                {"entity_type": "bogus", "entity_id": "EX"})
+            self.assertEqual(status, 400, payload)
+            # bad token is rejected (401/403 per the api's convention)
+            status, payload = post(
+                "/api/kb/v1/background-package", "wrong-token",
+                {"entity_type": "company", "entity_id": "EX"})
+            self.assertIn(status, (401, 403), payload)
+        finally:
+            if server is not None:
+                server.shutdown()
+                server.server_close()
+            kb.close()
+
 
 if __name__ == "__main__":
     unittest.main()
