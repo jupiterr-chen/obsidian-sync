@@ -11,6 +11,7 @@ __pycache__/
 !.env.example
 config/.env
 config/config.json
+deploy/config/
 opencode.json
 
 # Runtime state / databases / vault / installers

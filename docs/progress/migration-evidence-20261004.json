@@ -1,0 +1,302 @@
+{
+  "baseline": "42d0dd458f19e2f0687c6ef347ce0a8bb68e6826",
+  "source_image": "obsidian-sync:42d0dd4",
+  "completion": {
+    "run": "/vol2/1000/10.Develop/obsidian-sync/backups/migration-20261004T054637Z",
+    "phase": "core-migration-verified",
+    "finished_at": "2026-10-04T06:03:52.372219+00:00",
+    "new_catalog_runs": 88,
+    "old_catalog_runs": 84,
+    "mounts_use_new_home": {
+      "obsidian-sync-library": true,
+      "obsidian-sync-syncthing": true,
+      "obsidian-sync-status-collector": true,
+      "obsidian-sync-knowledge-api": true
+    },
+    "matching_user_cron": false,
+    "catalog_business_columns_unchanged": {
+      "documents": true,
+      "versions": true
+    },
+    "library_health": "ok",
+    "hourly_ingestion_seconds": 3600,
+    "knowledge_worker_enabled": false,
+    "model_egress_enabled": false,
+    "automatic_candidate_export": false,
+    "knowledge_api_bind": "127.0.0.1:8766",
+    "observation_7_days": "NOT_COMPLETE"
+  },
+  "services_and_checks": {
+    "search_hits": 3,
+    "old_evidence": {
+      "block_resolves": true,
+      "version_resolves": true
+    },
+    "sample_originals": [
+      {
+        "source": "reports",
+        "old_url_and_snapshot_sha_valid": [
+          true,
+          true
+        ]
+      },
+      {
+        "source": "discord",
+        "old_url_and_snapshot_sha_valid": [
+          true,
+          true
+        ]
+      }
+    ],
+    "incremental_runs": [
+      {
+        "ok": true,
+        "changes": 0,
+        "rendered": {
+          "cards_written": 0,
+          "cards_unchanged": 523,
+          "pages_written": 0,
+          "human_initialized": 0
+        }
+      },
+      {
+        "ok": true,
+        "changes": 0,
+        "rendered": {
+          "cards_written": 0,
+          "cards_unchanged": 523,
+          "pages_written": 0,
+          "human_initialized": 0
+        }
+      },
+      {
+        "ok": true,
+        "changes": 0,
+        "rendered": {
+          "cards_written": 0,
+          "cards_unchanged": 523,
+          "pages_written": 0,
+          "human_initialized": 0
+        }
+      }
+    ],
+    "vault": {
+      "before_files": 541,
+      "after_files": 541,
+      "missing": 0,
+      "changed": 0,
+      "changed_generated_only": true
+    },
+    "system/status": {
+      "same_device": true
+    },
+    "system/connections": {
+      "connected": [
+        true
+      ]
+    },
+    "db/status?folder=research-vault": {
+      "state": "idle",
+      "needFiles": 0,
+      "needBytes": 0,
+      "pullErrors": 0
+    },
+    "containers": {
+      "research-kb-library": {
+        "status": "exited",
+        "health": "unhealthy"
+      },
+      "research-kb-syncthing": {
+        "status": "exited",
+        "health": "unhealthy"
+      },
+      "research-kb-status-collector": {
+        "status": "exited",
+        "health": null
+      },
+      "obsidian-sync-library": {
+        "status": "running",
+        "health": "healthy"
+      },
+      "obsidian-sync-syncthing": {
+        "status": "running",
+        "health": "healthy"
+      },
+      "obsidian-sync-status-collector": {
+        "status": "running",
+        "health": null
+      },
+      "obsidian-sync-knowledge-api": {
+        "status": "running",
+        "health": "healthy"
+      }
+    }
+  },
+  "database_comparison": {
+    "catalog": {
+      "documents": {
+        "equal": false,
+        "before_rows": 538,
+        "after_rows": 538
+      },
+      "versions": {
+        "equal": false,
+        "before_rows": 528,
+        "after_rows": 528
+      },
+      "sources": {
+        "equal": false,
+        "before_rows": 2,
+        "after_rows": 2
+      },
+      "ingest_runs": {
+        "equal": false,
+        "before_rows": 84,
+        "after_rows": 85
+      },
+      "sqlite_sequence": {
+        "equal": false,
+        "before_rows": 2,
+        "after_rows": 2
+      },
+      "meta": {
+        "equal": false,
+        "before_rows": 7,
+        "after_rows": 7
+      },
+      "changes": {
+        "equal": true,
+        "before_rows": 3,
+        "after_rows": 3
+      }
+    },
+    "knowledge": {
+      "kb_documents": {
+        "equal": true,
+        "before_rows": 538,
+        "after_rows": 538
+      },
+      "kb_versions": {
+        "equal": true,
+        "before_rows": 528,
+        "after_rows": 528
+      },
+      "snapshot_blobs": {
+        "equal": true,
+        "before_rows": 524,
+        "after_rows": 524
+      },
+      "snapshots": {
+        "equal": true,
+        "before_rows": 524,
+        "after_rows": 524
+      },
+      "jobs": {
+        "equal": true,
+        "before_rows": 2096,
+        "after_rows": 2096
+      },
+      "sqlite_sequence": {
+        "equal": true,
+        "before_rows": 4,
+        "after_rows": 4
+      },
+      "sync_runs": {
+        "equal": true,
+        "before_rows": 1,
+        "after_rows": 1
+      },
+      "extractions": {
+        "equal": true,
+        "before_rows": 1123,
+        "after_rows": 1123
+      },
+      "blocks": {
+        "equal": true,
+        "before_rows": 213829,
+        "after_rows": 213829
+      },
+      "index_generations": {
+        "equal": true,
+        "before_rows": 2,
+        "after_rows": 2
+      },
+      "index_postings": {
+        "equal": true,
+        "before_rows": 1417832,
+        "after_rows": 1417832
+      },
+      "index_doc_terms": {
+        "equal": true,
+        "before_rows": 105136,
+        "after_rows": 105136
+      },
+      "kb_events": {
+        "equal": true,
+        "before_rows": 2192,
+        "after_rows": 2192
+      },
+      "block_embeddings": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "analysis_runs": {
+        "equal": true,
+        "before_rows": 1,
+        "after_rows": 1
+      },
+      "usage_events": {
+        "equal": true,
+        "before_rows": 1,
+        "after_rows": 1
+      },
+      "claims": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "claim_revisions": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "decisions": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "review_proposals": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "budget_reservations": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      },
+      "impact_outbox": {
+        "equal": true,
+        "before_rows": 0,
+        "after_rows": 0
+      }
+    }
+  },
+  "windows": {
+    "before_files": 545,
+    "missing": 0,
+    "changed": 0,
+    "system/connections": {
+      "connected": [
+        true
+      ]
+    },
+    "db/status?folder=research-vault": {
+      "state": "idle",
+      "needFiles": 0,
+      "needBytes": 0,
+      "pullErrors": 0
+    }
+  }
+}

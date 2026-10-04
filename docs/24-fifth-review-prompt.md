@@ -1,15 +1,15 @@
-# 连续执行提示词（不再整包返工）
+# 迁移后的下一阶段提示词
 
-当前执行者可直接继续；只有需要交接时才使用以下提示词。
+基础迁移已经完成，不需要再向其他agent下发迁移任务。本提示词留给后续“仅新增全文处理”阶段。
 
 ```text
-在 D:\2.Develop\8.Obsidian\obsidian-sync 继续基础迁移，先读 AGENTS.md、docs/progress/FIFTH-REVIEW-20261004.md、docs/23-fifth-review-taskbook.md。用户最新要求：按主体功能影响决定阻断，不为增强功能缺陷反复整包返工。
+在 D:\2.Develop\8.Obsidian\obsidian-sync 工作，先读 AGENTS.md、docs/progress/MIGRATION-20261004.md 和 docs/23-fifth-review-taskbook.md。
 
-优先执行 M1–M6：只读盘点、备份与实际隔离恢复、配置核对、冻结准确旧写者、校验复制切换、Windows同步/原文/数据库文件/人工区/增量三连跑/回滚验证。旧目录保留。用户已明确授权条件满足后的整体迁移和旧栈停机，不重复问相同授权。M0已完成。
+M1–M6基础迁移已完成：新四服务运行，旧三容器已停止，Windows同步正常。不要再次迁移、重新整合M0或启动旧栈。真实生产编排在报告指定的releases/42d0dd4/deploy/migration-compose.json，不要直接用旧默认全栈命令覆盖线上配置。
 
-V01模型成功请求计数、V03历史public-as-of误填审计、V04候选导出恢复进入后续fix清单；当前关闭远程模型，暂缓开放public-as-of和新增自动候选导出，保留所有已有数据。V02影子工具修复也可后置，但迁移必须独立全量校验实际文件hash/数据库和恢复，不能相信shadow_reconcile的exit0。shadow2真实30文件已确认与DB一致，但manifest30个来源hash为空。金标准保留NOT_RUN，限制分析/OCR质量声明，不阻塞基础迁移。
+后续优先设计并实现“仅新增/真实修改内容”的知识层增量处理，保留旧提取/索引/证据，避免新recipe触发524份旧资料全量回填。当前knowledge-worker尚未启动，第一层小时同步正常。按有限样本、可中断恢复、重复三连跑、模型全部关闭的方式验收后再受控开启worker。全量旧recipe升级应另列可预算任务，不混进本阶段。
 
-遇到数据丢失、恢复失败、旧主链回归、人工内容覆盖、同步身份错误、双写或无法回滚才停止切换并精确修复。每阶段保存恢复点和实际证据；失败保护新写入并恢复旧服务。
+V01请求计数、V03历史public-as-of、V04候选导出作为对应功能启用前的fix，V02影子工具在再次用作发布门禁前修复；CLI snapshot_root未传入API的问题已有working_dir=/部署规避，后续补正确配置传递。不要为了这些非当前交付范围的问题重新整包返工或重做基础迁移。质量金标准仍NOT_RUN，七天观察未完成，诚实记录。
 
-禁止OpenCode、付费模型/资料外发、递归删除或移动、改权限、宽泛pkill、force push、输出凭据。只提交源码、合成证据、脱敏报告；不能提交私有原文/运行数据库。唯一远端 git@github.com:jupiterr-chen/obsidian-sync.git。正常提交push，报告当前状态、入口、备份及回滚位置和待观察项。
+禁止OpenCode、新增付费模型/资料外发、递归删除或移动、改权限、宽泛pkill、force push、输出凭据。保留旧目录、备份、人工文件和所有历史证据。每阶段记录实际证据和恢复点，源码/脱敏文档正常提交push到唯一远端git@github.com:jupiterr-chen/obsidian-sync.git。
 ```

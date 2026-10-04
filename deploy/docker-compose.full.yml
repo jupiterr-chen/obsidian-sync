@@ -2,8 +2,8 @@
 
 # Supersedes the first-layer docker-compose.yml at cutover time: library +
 # syncthing + status-collector (unchanged service shapes, new data home) plus
-# the knowledge worker and API. The old research-kb stack keeps running until
-# the user explicitly confirms takedown (see deploy/CUTOVER.md).
+# the knowledge worker and API. Basic cutover is complete; the worker is
+# opt-in until incremental processing can avoid an implicit full backfill.
 
 # Data home: RESEARCHKB_HOME (default the new project dir on the server).
 # Source archives stay READ-ONLY mounts. Real config/config.json and
@@ -85,6 +85,7 @@ services:
 
   knowledge-worker:
     <<: *library-base
+    profiles: ["enhanced-worker"]
     container_name: obsidian-sync-knowledge-worker
     command: ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
     environment:
@@ -111,6 +112,9 @@ services:
   knowledge-api:
     <<: *library-base
     container_name: obsidian-sync-knowledge-api
+    # Current CLI defaults snapshot lookup to state/snapshots relative to cwd.
+    # Keep that path aligned with /state/snapshots until config wiring is fixed.
+    working_dir: /
     command: ["python", "-m", "knowledge", "serve-kb", "--config", "/app-config/knowledge.json"]
     volumes:
       - ${RESEARCHKB_HOME:?set RESEARCHKB_HOME}/state:/state
