@@ -4,6 +4,8 @@
 
 当前交付：**2026-10-04基础迁移与旧栈停机完成。** 新栈数据、恢复、原文、旧证据、三连跑和Windows同步验收通过。第一层每小时同步正常；知识自动worker、远程模型和自动候选仍暂缓。见[迁移报告与入口](docs/progress/MIGRATION-20261004.md)及[后续fix清单](docs/23-fifth-review-taskbook.md)。
 
+下一阶段按[目标交付链](docs/25-target-workflow-delivery.md)推进：自动解析与阅读 → 单篇LLM分析 → 公司/主题知识总结 → 投资框架接入。
+
 ## 阅读顺序
 
 1. [总体设计](docs/01-architecture.md)
