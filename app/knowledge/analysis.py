@@ -49,10 +49,14 @@ def budgeted_embed(embedder: EmbeddingProvider, texts: List[str],
     # T02: when the provider carries a per-attempt gate, requests are
     # counted per PHYSICAL attempt; the outer reservation then covers only
     # tokens so cap=1 allows exactly one attempt, not zero
+    # V01: attempt-gated providers enforce the cap per PHYSICAL attempt;
+    # the business reservation is token-only and its SETTLED usage row is
+    # the persistent request of record
     gated = hasattr(embedder, "attempt_ledger")
     reservation = ledger.reserve("embedding", est, count_request=not gated)
-    if gated:
+    if hasattr(embedder, "attempt_ledger"):
         embedder.attempt_ledger = ledger
+        embedder._attempt_count_requests = False
     try:
         vectors, usage = embedder.embed(texts)
     except Exception:
@@ -269,6 +273,8 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
         # U02: when the chat provider carries the per-attempt gate, physical
         # attempts are the request unit - the business reservation covers
         # tokens only (mirrors the embedding path)
+        # V01: business reservation counts the logical request (persists on
+        # settle); the attempt gate bounds physical retries separately
         gated_chat = hasattr(chat, "attempt_ledger")
         try:
             reservation = ledger.reserve("chat", estimated_input,
@@ -279,8 +285,9 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
             kb.update_analysis_run(run_id, status="failed", error=code)
             return {"run_id": run_id, "status": "failed", "error": code,
                     "retryable": False}
-        if gated_chat:
+        if hasattr(chat, "attempt_ledger"):
             chat.attempt_ledger = ledger
+            chat._attempt_count_requests = False
         try:
             draft, usage = chat.complete(prompt)
         except EgressNotAllowed:

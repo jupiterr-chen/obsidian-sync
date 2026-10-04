@@ -105,9 +105,50 @@ def _content_identity(directory: str, name: str, content: str,
 
 
 def _candidate_for_identity(directory: str, identity: str) -> Optional[str]:
+    """Resolve a candidate identity to its published file.
+
+    V04: the manifest is authoritative, but a crash between exclusive file
+    creation and the manifest save leaves an orphan. Orphans are adopted
+    by identity marker: a deterministic file whose name or content hash
+    matches the identity IS the single publication (created exclusively) -
+    the retry registers it instead of creating a second copy."""
     manifest = _load_manifest(directory)
     entry = manifest.get("candidates", {}).get(identity)
-    return entry if entry and os.path.isfile(entry) else None
+    if entry and os.path.isfile(entry):
+        return entry
+    # orphan adoption: match the stable_id marker inside the identity
+    marker = identity.rsplit(".", 1)[-1]
+    prefix = identity.split(".")[0]
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return None
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            if not os.path.isfile(path):
+                continue
+            if marker in name:
+                _register_orphan(directory, identity, path)
+                return path
+            if name.startswith(prefix) and os.path.getsize(path) >= 0:
+                with open(path, "r", encoding="utf-8") as handle:
+                    if marker in handle.read(2048):
+                        _register_orphan(directory, identity, path)
+                        return path
+        except OSError:
+            continue
+    return None
+
+
+def _register_orphan(directory: str, identity: str, path: str) -> None:
+    """V04: persist an adopted orphan into the manifest (crash between
+    exclusive creation and registration must not recur on the next run)."""
+    manifest = _load_manifest(directory)
+    if manifest.get("candidates", {}).get(identity) == path:
+        return
+    manifest.setdefault("candidates", {})[identity] = path
+    _save_manifest(directory, manifest)
 
 
 def _unique_candidate(directory: str, name: str, content: str,
@@ -119,19 +160,29 @@ def _unique_candidate(directory: str, name: str, content: str,
     overwritten."""
     identity = _content_identity(directory, name, content, stable_id)
     existing = _candidate_for_identity(directory, identity)
-    if existing is not None:
+    if existing is not None and existing != os.path.join(directory, name):
         return existing  # same content already published exactly once
+    if existing == os.path.join(directory, name):
+        # identity maps to the MAIN file but that file has since been
+        # human-edited (or otherwise no longer holds this content): the
+        # machine revision must exist beside it - create one candidate and
+        # REMAP the identity; never overwrite the human file.
+        pass  # fall through to exclusive creation below
     base = os.path.splitext(name)[0]
     stamp = utc_now().replace(":", "").replace("-", "")[:15]
     while True:
-        candidate = os.path.join(
-            directory, "%s.candidate-%s-%s.md"
-            % (base, stamp, secrets.token_hex(4)))
+        # V04: the stable business marker is part of the FILENAME so a
+        # crash between creation and registration leaves an adoptable,
+        # deterministic orphan instead of an anonymous one
+        candidate_name = ("%s.candidate-%s-%s.md"
+                          % (base, stamp, secrets.token_hex(4)))             if not stable_id else             ("%s.candidate-%s.md" % (base, stable_id))
+        candidate = os.path.join(directory, candidate_name)
         if _exclusive_create(candidate, content):
             manifest = _load_manifest(directory)
             manifest.setdefault("candidates", {})[identity] = candidate
             _save_manifest(directory, manifest)
             return candidate
+    return os.path.join(directory, name)  # unreachable; keeps callers safe
 
 
 def write_candidate(directory: str, name: str, content: str,
@@ -169,23 +220,40 @@ def write_candidate(directory: str, name: str, content: str,
             identity = _content_identity(directory, name, content,
                                           stable_id=stable_id)
             already = _candidate_for_identity(directory, identity)
-            if already is not None:
+            if already is not None and already != target:
                 # T07/U04: this business revision was already delivered
                 # beside the main file - publish once, never duplicate
                 return {"outcome": "unchanged", "path": target,
                         "candidate_path": already}
+            if already == target:
+                # V04: the identity currently points at the MAIN file, but
+                # the file no longer matches (human edit): the machine
+                # revision must exist beside it - publish one candidate and
+                # REMAP the identity to it; the human file stays untouched.
+                candidate = _unique_candidate(directory, name, content,
+                                              stable_id=stable_id)
+                return {"outcome": "preserved_with_candidate", "path": target,
+                        "candidate_path": candidate}
             candidate = _unique_candidate(directory, name, content,
                                           stable_id=stable_id)
             return {"outcome": "preserved_with_candidate", "path": target,
                     "candidate_path": candidate}
         # first creation: exclusive create; a losing racer falls back to a
-        # candidate instead of overwriting the winner
+        # candidate instead of overwriting the winner. V04: the business
+        # identity is registered WITH the first publish so a later export
+        # of the same revision (after a human edit) resolves to this same
+        # identity instead of publishing a fresh candidate.
         if _exclusive_create(target, content):
             manifest["files"][name] = {"last_hash": new_hash, "owner": owner,
                                        "written_at": utc_now()}
+            if stable_id:
+                manifest.setdefault("candidates", {})[
+                    _content_identity(directory, name, content,
+                                      stable_id=stable_id)] = target
             _save_manifest(directory, manifest)
             return {"outcome": "written", "path": target}
-        candidate = _unique_candidate(directory, name, content)
+        candidate = _unique_candidate(directory, name, content,
+                                      stable_id=stable_id)
         return {"outcome": "preserved_with_candidate", "path": target,
                 "candidate_path": candidate}
     finally:
@@ -202,7 +270,7 @@ def render_claim_candidate(claim: Dict[str, Any],
         "- **状态**：%s（待审核）" % claim["status"],
         "- **claim**：`%s` rev %d" % (claim["claim_id"], claim["current_revision"]),
         "- **作者/版本**：%s / %s" % (claim.get("author"), claim.get("prompt_version")),
-        "- **生成时间**：%s" % utc_now(),
+        "- **生成时间**：%s" % (claim.get("updated_at") or utc_now()),
         "",
         "## 陈述",
         "",

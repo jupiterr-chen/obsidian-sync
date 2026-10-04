@@ -164,6 +164,8 @@ class _HttpProvider:
             from .budget import BudgetExceeded
 
             try:
+                # V01: attempts never add request counts - they only FAIL
+                # CLOSED when the persistent request budget is exhausted
                 return self.attempt_ledger.reserve("http-attempt", 1)
             except BudgetExceeded:
                 raise ProviderCallError(

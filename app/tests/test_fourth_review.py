@@ -323,14 +323,16 @@ class U04RealClaimExportTest(unittest.TestCase):
             for _ in range(3):
                 export_claim_candidates(kb, directory, status="accepted")
                 time.sleep(1.1)  # different rendered timestamps
-            # the main file + EXACTLY ONE candidate across three
-            # differently-timestamped renders (was 3 candidates)
-            candidates = [f for f in os.listdir(directory)
-                          if f.startswith(created["claim_id"])
-                          and ".candidate-" in f]
-            self.assertEqual(len(candidates), 1,
-                             "unchanged claim produced %d candidates: %r"
-                             % (len(candidates), candidates))
+            # F0/V04 final semantics: the render timestamp is derived
+            # from the claim's fixed updated_at, so identical revisions
+            # render IDENTICAL bytes across seconds - the re-exports are
+            # pure no-ops (no candidate, no duplication; was 3 candidates)
+            artifacts = [f for f in os.listdir(directory)
+                         if f.startswith(created["claim_id"])
+                         and f.endswith(".md")]
+            self.assertEqual(len(artifacts), 1,
+                             "unchanged claim produced %d artifacts: %r"
+                             % (len(artifacts), artifacts))
         finally:
             kb.close()
 
@@ -361,7 +363,8 @@ class U05ShadowToolingTest(unittest.TestCase):
         with open(manifest, "w", encoding="utf-8") as handle:
             json.dump({"samples": [{"source": "reports", "doc_id": "X",
                                     "version_id": "v1", "sha256": "a" * 64,
-                                    "split": "tune", "stratum": "s"}]},
+                                    "split": "tune", "stratum": "s"}],
+                       "expected_extraction_digest": "d" * 64},
                       handle)
         # a REAL (minimal) config so the tool reaches the isolation check
         cfg = os.path.join(temp_dir(), "shadow-cfg.json")

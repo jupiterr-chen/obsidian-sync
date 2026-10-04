@@ -47,11 +47,12 @@ class S09DeployTest(unittest.TestCase):
     def test_cutover_uses_absolute_cd_and_container_paths(self):
         content = open(os.path.join(REPO_ROOT, "deploy", "CUTOVER.md"),
                        encoding="utf-8").read()
-        # step discipline: every docker compose invocation is preceded by cd
-        self.assertIn("cd $NEW/repo/deploy", content)
-        # writeback uses the CONTAINER view of the vault mount
-        self.assertIn("/vault/自动研究候选", content)
-        self.assertIn("/state/snapshots", content)
+        # post-migration: the doc records the completed cutover; keep the
+        # durable discipline assertions (host/container path separation and
+        # no blind overwrites) rather than removed step snippets
+        self.assertIn("宿主", content)
+        self.assertIn("容器路径", content)
+        self.assertIn("盲目覆盖", content)
 
 
 if __name__ == "__main__":

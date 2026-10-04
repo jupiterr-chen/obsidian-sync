@@ -181,9 +181,14 @@ def main(argv=None) -> int:
         embedder = providers.get("embedding")
         vision = providers.get("vision_ocr")
         budget = load_budget(config.extra)  # top-level first, legacy nested
-        server = build_kb_server(kb, tokens, config.kb_bind_host, config.kb_bind_port,
+        # F0-5: pass the CONFIGURED snapshot root into the API so fixed
+        # snapshot serving works from any cwd (the migration hit this:
+        # the default fell back to a cwd-relative path and 404'd)
+        server = build_kb_server(kb, tokens, config.kb_bind_host,
+                                 config.kb_bind_port,
                                  embedder=embedder, chat=chat, budget=budget,
-                                 vision=vision)
+                                 vision=vision,
+                                 snapshot_root=config.snapshot_root)
         print("knowledge api serving on http://%s:%d/api/kb/v1"
               % (config.kb_bind_host, config.kb_bind_port), flush=True)
         try:

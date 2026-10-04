@@ -145,9 +145,9 @@ class VisionApiOcr(OcrEngine):
                 raise OcrEngineError(
                     "budget_exceeded_per_page: page estimate %d > cap %d"
                     % (self.page_token_cap, ceiling))
-            # U02: when the provider is attempt-gated, physical attempts
-            # are the request unit; the page reservation counts a PAGE but
-            # not an extra request (mirrors chat/embedding)
+            # V01: attempt-gated providers enforce the cap per physical
+            # attempt; the page reservation is token-only and its settled
+            # usage row is the persistent request of record
             gated = hasattr(self.chat_provider, "attempt_ledger")
             try:
                 reservation = self.ledger.reserve(

@@ -45,6 +45,24 @@ def main() -> int:
         print(json.dumps({"ok": False, "error": "empty manifest"}))
         return 1
 
+    # V02: the manifest must pin per-sample source hashes and the expected
+    # recipe - un-locked inputs are refused before any work
+    no_sha = [s for s in samples if not s.get("sha256")]
+    if no_sha:
+        print(json.dumps({
+            "ok": False,
+            "error": "manifest incomplete: %d samples lack sha256"
+                     % len(no_sha),
+        }))
+        return 4
+    if not manifest.get("expected_extraction_digest"):
+        print(json.dumps({
+            "ok": False,
+            "error": "manifest incomplete: expected_extraction_digest"
+                     " missing (recipe not locked)",
+        }))
+        return 4
+
     # U05: hard isolation FIRST - a state-dir at/inside the production
     # state or equal to any configured production path is refused BEFORE
     # any probe or write

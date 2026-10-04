@@ -89,6 +89,8 @@ class BudgetLedger:
           (SELECT COUNT(*) FROM budget_reservations
              WHERE status IN ('reserved')
                AND counts_request = 1) AS res_r,
+          (SELECT COUNT(*) FROM usage_events
+             WHERE kind = 'http-attempt') AS attempt_usage,
           (SELECT COUNT(*) FROM usage_events WHERE kind='vision') AS used_p,
           (SELECT COUNT(*) FROM budget_reservations
              WHERE status IN ('reserved','unknown')
@@ -99,7 +101,8 @@ class BudgetLedger:
         row = conn.execute(self._TOTALS_SQL).fetchone()
         return {"input": row["used_i"] + row["res_e"],
                 "requests": row["calls"] + row["res_r"],
-                "pages": row["used_p"] + row["res_p"]}
+                "pages": row["used_p"] + row["res_p"],
+                "dispatched_attempts": row["attempt_usage"]}
 
     def _totals(self) -> Dict[str, int]:
         with self.kb._lock:
@@ -132,6 +135,12 @@ class BudgetLedger:
                         " used+reserved=%d, request=%d, cap=%d"
                         % (totals["input"], est_input,
                            budget.max_total_input_tokens))
+                if kind == "http-attempt" \
+                        and budget.max_requests_total is not None \
+                        and totals["dispatched_attempts"] + totals["requests"] \
+                        + 1 > budget.max_requests_total:
+                    # retries need their own slot under the SAME cap
+                    raise BudgetExceeded("budget_exceeded_max_requests")
                 if (count_request
                         and budget.max_requests_total is not None
                         and totals["requests"] + 1 > budget.max_requests_total):
@@ -139,12 +148,15 @@ class BudgetLedger:
                 if counts_as_page and budget.max_pages_total is not None \
                         and totals["pages"] + 1 > budget.max_pages_total:
                     raise BudgetExceeded("budget_exceeded_max_pages")
+                attempt_kind = ("http-attempt" if kind == "http-attempt"
+                                else ("vision-page" if counts_as_page else kind))
+                counts_flag = 1 if count_request else 0
                 cur = conn.execute(
                     "INSERT INTO budget_reservations (kind, est_input,"
                     " status, run_id, created_at, counts_request)"
                     " VALUES (?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'),?)",
-                    ("vision-page" if counts_as_page else kind, est_input,
-                     "reserved", run_id, 1 if count_request else 0))
+                    (attempt_kind, est_input,
+                     "reserved", run_id, counts_flag))
                 reservation_id = cur.lastrowid
             except Exception:
                 conn.execute("ROLLBACK")
@@ -173,6 +185,14 @@ class BudgetLedger:
                     conn.execute("COMMIT")  # idempotent replay
                     return
                 input_tokens = usage.input_tokens or row["est_input"]
+                # a settled logical call IS a request of record even when
+                # its reservation skipped the cap slot (the cap was
+                # enforced per physical attempt instead)
+                settled_counts = (
+                    1 if row["kind"] in ("chat", "embedding", "vision-page",
+                                          "http-attempt")
+                    else (row["counts_request"] if "counts_request" in
+                          row.keys() else 1))
                 conn.execute(
                     "INSERT INTO usage_events (provider, model, kind,"
                     " input_tokens, output_tokens, cost_basis, run_id,"
@@ -182,9 +202,7 @@ class BudgetLedger:
                     (usage.provider, usage.model,
                      usage_kind_for_reservation(row["kind"]),
                      input_tokens, usage.output_tokens, usage.cost_basis,
-                     run_id, reservation_id,
-                     row["counts_request"] if "counts_request" in row.keys()
-                     else 1))
+                     run_id, reservation_id, settled_counts))
                 conn.execute(
                     "UPDATE budget_reservations SET status='settled',"
                     " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"
@@ -224,6 +242,12 @@ class BudgetLedger:
                 if current is None or current["status"] in ("settled", "unknown"):
                     conn.execute("COMMIT")  # idempotent replay
                     return
+                # a DISPATCHED attempt is a request of record even when
+                # its reservation never counted toward the cap
+                unknown_counts = (
+                    1 if current["kind"] == "http-attempt"
+                    else (current["counts_request"] if "counts_request" in
+                          current.keys() else 1))
                 conn.execute(
                     "INSERT INTO usage_events (provider, model, kind,"
                     " input_tokens, output_tokens, cost_basis, run_id,"
@@ -232,9 +256,7 @@ class BudgetLedger:
                     "'estimate:not-provider-measured',?,?,"
                     "strftime('%Y-%m-%dT%H:%M:%SZ','now'),?)",
                     (current["kind"], current["est_input"], run_id,
-                     reservation_id,
-                     current["counts_request"] if "counts_request" in
-                     current.keys() else 1))
+                     reservation_id, unknown_counts))
                 conn.execute(
                     "UPDATE budget_reservations SET status='unknown',"
                     " settled_at=strftime('%Y-%m-%dT%H:%M:%SZ','now')"

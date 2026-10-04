@@ -79,9 +79,12 @@ class R13DeployArtifactsTest(unittest.TestCase):
                        encoding="utf-8").read()
         self.assertNotIn("OLD_CATALOG", content)  # placeholder db path (R13)
         self.assertNotIn("NEW_CATALOG", content)
-        self.assertIn("sqlite3", content)         # real online-backup snippet
-        self.assertIn("run-extracts", content)    # backfill writer frozen
-        self.assertIn("回滚", content)
+        # post-migration document: records the completed cutover and the
+        # rollback discipline; online-backup + precise-writer rules remain
+        self.assertIn("SQLite backup API", content)
+        self.assertIn("宽泛pkill", content)       # precise writer stops only
+        self.assertIn("回退", content)
+        self.assertIn("MIGRATION-20261004", content)  # links actual report
 
 
 class R14DrillStrictnessTest(unittest.TestCase):

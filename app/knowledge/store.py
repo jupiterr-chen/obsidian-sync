@@ -479,7 +479,11 @@ class KnowledgeStore:
                         public_at = doc_filed
                         public_basis = "filing_date"
                     else:
-                        # no usable evidence for THIS version -> unknown
+                        # no usable evidence for THIS version -> unknown.
+                        # V03: this also SELF-HEALS rows the pre-U03 code
+                        # misbound (inherited doc date on an unknown/
+                        # later-observed version): the recomputed value
+                        # replaces the stale inherited one on re-sync.
                         public_at, public_basis = None, "unknown"
                 conn.execute(
                     "INSERT INTO kb_versions ("
@@ -490,10 +494,23 @@ class KnowledgeStore:
                     " ON CONFLICT(source, doc_id, version_id) DO UPDATE SET"
                     "  is_current=excluded.is_current, state=excluded.state,"
                     "  rel_path=excluded.rel_path, synced_at=excluded.synced_at,"
-                    "  public_available_at=COALESCE(excluded.public_available_at,"
-                    "    public_available_at),"
-                    "  public_time_basis=COALESCE(public_time_basis,"
-                    "    excluded.public_time_basis, 'unknown')",
+                    "  public_available_at=CASE"
+                    "    WHEN excluded.public_time_basis IN"
+                    "      ('published_at','filing_date')"
+                    "    THEN excluded.public_available_at"
+                    "    WHEN public_time_basis IN ('published_at','filing_date')"
+                    "      AND excluded.public_time_basis = 'unknown'"
+                    "    THEN NULL"
+                    "    ELSE public_available_at END,"
+                    "  public_time_basis=CASE"
+                    "    WHEN excluded.public_time_basis IN"
+                    "      ('published_at','filing_date')"
+                    "    THEN excluded.public_time_basis"
+                    "    WHEN public_time_basis IN ('published_at','filing_date')"
+                    "      AND excluded.public_time_basis = 'unknown'"
+                    "    THEN 'unknown'"
+                    "    ELSE COALESCE(public_time_basis,"
+                    "      excluded.public_time_basis, 'unknown') END",
                     (
                         row["source"], row["doc_id"], row["version_id"],
                         row.get("sha256"), row.get("bytes"), row.get("media_type"),

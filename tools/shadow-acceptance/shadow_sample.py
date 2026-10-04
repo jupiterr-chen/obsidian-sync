@@ -106,6 +106,26 @@ def main() -> int:
     finally:
         plan_store.close()
 
+    # V02: refuse a manifest whose samples lack the source content hash -
+    # reconciliation cannot verify inputs without it
+    missing_sha = [s for s in plan.get("samples", []) if not s.get("sha256")]
+    if missing_sha:
+        print(json.dumps({
+            "ok": False,
+            "error": "refusing manifest: %d samples lack source sha256"
+                     % len(missing_sha),
+        }))
+        return 4
+
+    # V02: lock the expected extraction recipe INTO the manifest - the
+    # runner and reconciler verify against this, not whatever is current
+    from knowledge.extract import extract_config_digest
+
+    plan["expected_extraction_digest"] = extract_config_digest()
+    plan["recipe_locked_at"] = __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc).replace(
+        microsecond=0).isoformat().replace("+00:00", "Z")
+
     manifest_path = os.path.join(args.out_dir, "shadow-manifest.json")
     with open(manifest_path, "w", encoding="utf-8", newline="\n") as handle:
         json.dump(plan, handle, ensure_ascii=False, indent=2)
