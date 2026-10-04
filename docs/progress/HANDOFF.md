@@ -32,6 +32,12 @@
 
 - 无失败测试。各阶段已知限制见对应报告（标准库 PDF 解析器覆盖、事件保留期未配、rerank 未实现、unsupported_numeric_claims 占位等）。
 
+## 2026-10-04 第四轮修复完成（U01-U05，探针+服务器实测）
+
+- 第四轮复核 → 全部修复（`6a2e57d`）：旧库迁移在**生产库副本**上实际运行业务通过；三 provider 入口统一 attempt 门禁；legacy NULL 不绑定；claim 导出幂等；影子链封闭（manifest hash/生产路径拒绝/强制禁外发——shadow2 全程 usage_events=0）。
+- 310 tests OK；shadow2（seed 20261004）30/30 处理+三连跑幂等+对账 ready 28/review 2/failed 0；shadow1 保留。
+- 待人工：shadow2/annotations 30 份金标准（A04/A06/A08/A09）→ NOT_RUN。全量/停机条件见 release-readiness-log。
+
 ## 2026-10-03（深夜）第三轮修复 + G1 通过 + 影子验收进行中
 
 - 第三轮复核（T01-T07）→ 全部修复（提交 c99f159 → 552a67b）；**G1 通过**：探针 14/14、301 tests。

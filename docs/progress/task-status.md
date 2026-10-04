@@ -89,6 +89,18 @@
 
 **G1 通过**：探针 14/14 + 301 tests。N5 影子小批进行中（服务器隔离目录）；N6 全量 dry-run 完成（524 重提取/14,751 页/OCR 2,792 页；旧产物全保留）。详见 `release-readiness-log.md`。
 
+## 第四轮评审修复（2026-10-04，U01-U05 全 fixed）
+
+|问题|状态|提交|证据|
+|---|---|---|---|
+|U01 旧库迁移|fixed|6a2e57d|生产库副本升级+实际运行业务（26,612 token/3 req，旧行零丢失）|
+|U02 三入口门禁|fixed|6a2e57d|chat/vision/embedding cap1 均 1 次 transport；无孤儿 reserved|
+|U03 legacy 时间|fixed|6a2e57d|NULL=unknown 不绑定；探针 0 命中|
+|U04 claim 导出|fixed|6a2e57d|同 claim 三导出恰 1 候选|
+|U05 影子链|fixed|6a2e57d|manifest hash+sha256；生产路径拒绝；强制禁外发（usage=0 实证）；标注不覆盖|
+
+310 tests OK；shadow2 独立 run 30/30 全成+幂等；G2 待人工标注。
+
 ## 记录
 
 - 2026-10-01：M0 完成。源基线 commit 5442e397（52 跟踪文件，工作树干净），复制 49 个公开文件（40 字节一致 / 3 行尾规范化 / 6 文档加来源头），合并 3 个根配置，排除 7 类私有内容。源工程与目标工程测试同为 113 OK（1 skipped）。源目录、Vault、ResearchTools 未改动。

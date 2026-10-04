@@ -53,3 +53,28 @@
 - 恢复：任务幂等（stage+config 唯一），中断即续。
 
 ## G2 状态：**未达成**（等影子人工标注 + 真实门禁）；全量/生产操作待授权。
+
+## 第四轮评审修复（2026-10-04，U01-U05）
+
+基线：`cd3bb5d` + 评审提交 `798c0d1`/`43018a9`；回归载体 `app/tests/test_fourth_review.py`（9 项断言，基线 7 RED）；探针 `fourth-review-probe-20261003.py` 逐字重跑全修复。
+
+| 问题 | RED（基线） | GREEN | 提交 |
+|---|---|---|---|
+| U01 旧库 counts_request | 0a473d9 旧库升级后首次 reserve 报 no such column | 迁移列表补 usage_events.counts_request；升级副本实际运行 reserve/settle/unknown/重放（合计含旧行），重开幂等 | 6a2e57d |
+| U02 三入口门禁 | chat/vision cap1 重试 2 次 transport、账本 1；embedding 成功后 http-attempt 永久 reserved | 三个真实入口（execute_analysis_run/VisionApiOcr/budgeted_embed）统一装配 attempt_ledger；每次物理尝试门禁+终态（成功 release、已派发失败 fail_unknown）；attempt-gated provider 的业务预留只计 token | 6a2e57d |
+| U03 legacy NULL | 迁移旧 v2（first_observed=NULL）继承 1 月公开日期、7 月查询命中 | NULL=unknown 永不绑定；绑定需 row_known+row_first+日期不早于首观察；NULL 基线回填显式 'unknown' | 6a2e57d |
+| U04 claim 导出 | 同 claim 三次不同秒导出=3 个 Markdown | 候选身份=claim_id/current_revision/模板版本（稳定业务身份，不依赖含时间的渲染哈希）；三次导出恰 1 份候选 | 6a2e57d |
+| U05 影子链 | manifest 30/30 缺 sha256；runner 可写生产路径、继承外发配置；标注可被重写 | SELECT 含 sha256；manifest 自哈希；state-dir 命中生产路径在任何探测/写入前拒绝（exit 3）；chat/vision/embedding 全部强制 egress_allowed=false、OCR fallback=null；标注独占创建不重写 | 6a2e57d |
+
+### 服务器实测（C6）
+
+1. **生产库升级演练（U01 真实场景）**：在线备份 API 复制生产 knowledge.sqlite3（升级前 usage_events 无 counts_request——与评审观察一致）→ KnowledgeStore 打开（迁移）→ reserve/settle/unknown/重放全部执行 → **26,612 token（含旧 26,602+新 10）/ 3 requests**，重开一致；**1,123 提取 / 213,829 块零丢失**。
+2. **shadow2 新独立 run（U05 封闭链）**：seed 20261004 选样 30 份（manifest_hash d25c541a…，30 份标注模板首次创建）；生产 state-dir 拒绝（exit 3）；隔离 state 处理 30/30 快照+提取全成（venv 解释器一致）；**usage_events=0（零模型调用证明）**；连跑三次第二/三轮 0 处理（幂等）；对账 ready 28/review 2/failed 0；A05 测量 26 份约 65.9 万 token（启发式）。此前 shadow1 保留未动。
+3. 教训已固化：同一 state 必须用同一解释器（venv）跑——system python3 缺 pypdfium2 会产生不同 recipe 身份的降级产物（影子期间实际发生并已用独立 state 重做，成为 interpreter 一致性的实证）。
+
+最终回归：**310 tests OK (2 skipped)**；第四轮探针 7 场景全修复（含 unchanged claim 3 导出→主文件+恰 1 候选）。
+
+### G2 前剩余
+
+- shadow2 的 30 份人工标注（A04/A06/A08/A09 金标准）未开始 → NOT_RUN。
+- 全量/切换待上述+用户启动指令（停机授权已有，条件未满足前不动旧栈）。
