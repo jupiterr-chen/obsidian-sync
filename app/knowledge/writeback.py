@@ -22,6 +22,7 @@ import json
 import os
 import secrets
 import tempfile
+import time
 from typing import Any, Dict, Optional
 
 from library.locking import FileLock
@@ -187,10 +188,21 @@ def _unique_candidate(directory: str, name: str, content: str,
 
 def write_candidate(directory: str, name: str, content: str,
                     owner: str = "knowledge",
-                    stable_id: Optional[str] = None) -> Dict[str, Any]:
+                    stable_id: Optional[str] = None,
+                    refreshable: bool = False) -> Dict[str, Any]:
     """Write or refresh one generated file under a registered directory.
 
-    Returns the outcome: written | unchanged | preserved_with_candidate.
+    Returns the outcome: written | unchanged | preserved_with_candidate
+    | refreshed.
+
+    refreshable marks FULLY DERIVED pages (the reading index/status
+    pages - a stale copy has no human value) and is the ONLY in-place
+    refresh path. It fires solely when the on-disk file still matches
+    the manifest's recorded last_hash: the manifest records system
+    writes only, so a matching hash proves no human edited the file
+    since the last system write. Any human touch (hash mismatch) falls
+    back to the append-only candidate path. Note files and claims are
+    never passed refreshable and stay append-only.
     """
     if not name or "/" in name or "\\" in name or name.startswith("."):
         raise WriteBackError("invalid candidate name %r" % name)
@@ -217,6 +229,43 @@ def write_candidate(directory: str, name: str, content: str,
                 with open(target, "r", encoding="utf-8") as handle:
                     if _sha256_text(handle.read()) == new_hash:
                         return {"outcome": "unchanged", "path": target}
+            # Derived-index refresh (A3): when the file is exactly what a
+            # system last wrote (disk hash == recorded last_hash) it holds
+            # no human content, so replacing it cannot lose any. The
+            # verify happens on the bytes ATOMICALLY with the replace -
+            # os.replace only runs if the file still matches, shrinking
+            # the race to the check-replace gap no editor fills.
+            if refreshable and recorded.get("last_hash"):
+                with open(target, "r", encoding="utf-8") as handle:
+                    current = handle.read()
+                if _sha256_text(current) == recorded.get("last_hash"):
+                    tmp = target + ".refresh.tmp"
+                    with open(tmp, "w", encoding="utf-8", newline="\n") as handle:
+                        handle.write(content)
+                    replaced = False
+                    # Windows AV/indexers briefly lock fresh files; retry
+                    # the atomic replace before giving up (on Linux this
+                    # succeeds first try). On failure we fall through to
+                    # the candidate path - never losing the safety rules.
+                    for attempt in range(5):
+                        with open(target, "r", encoding="utf-8") as handle:
+                            if _sha256_text(handle.read()) != recorded.get(
+                                    "last_hash"):
+                                break  # human edited mid-flight
+                        try:
+                            os.replace(tmp, target)
+                            replaced = True
+                            break
+                        except PermissionError:
+                            time.sleep(0.05 * (attempt + 1))
+                    if replaced:
+                        manifest["files"][name] = {
+                            "last_hash": new_hash, "owner": owner,
+                            "written_at": utc_now()}
+                        _save_manifest(directory, manifest)
+                        return {"outcome": "refreshed", "path": target}
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
             identity = _content_identity(directory, name, content,
                                           stable_id=stable_id)
             already = _candidate_for_identity(directory, identity)

@@ -209,8 +209,11 @@ class ReadingPublisher:
                 entries.append("- [%s](%s) — %s" % (
                     literal(title), name, extraction["status"]))
         content = render_index(entries, absent, published, without)
+        # index/status pages are fully derived: refreshable lets the entry
+        # switch as content changes, guarded by the manifest hash proof
+        # (any human edit forces the candidate path instead)
         outcome = write_candidate(self.output, INDEX_NAME, content,
-                                  owner="reading-publisher")
+                                  owner="reading-publisher", refreshable=True)
         # A4: processing-status page - every current version with its
         # stage (未发现/未提取/无正文/ready/review/failed) so users never
         # need hash filenames to know where a report is stuck
@@ -220,7 +223,8 @@ class ReadingPublisher:
             status_lines.append(entry)
         status_outcome = write_candidate(self.output, "处理状态.md",
                                          "\n".join(status_lines) + "\n",
-                                         owner="reading-publisher")
+                                         owner="reading-publisher",
+                                         refreshable=True)
         return {"outcome": outcome["outcome"], "published": published,
                 "without_text": without,
                 "status_outcome": status_outcome["outcome"]}

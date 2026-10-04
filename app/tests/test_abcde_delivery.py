@@ -240,6 +240,84 @@ class A3ReadingPublishTest(unittest.TestCase):
             kb.close()
 
 
+    def test_index_pages_refresh_in_place_but_human_edit_wins(self):
+        """A3 entry switching: the derived index/status pages must update
+        in place when untouched (else 开始阅读.md froze at its first
+        export), but a human edit must still force the candidate path.
+        Also covers migration adoption: the exporter-owned index
+        (existing-text-export) refreshes once content changes."""
+        from knowledge.reading import INDEX_NAME, ReadingPublisher
+        from knowledge.writeback import _load_manifest
+
+        kb = _kb()
+        try:
+            _seed_version(kb, "IX1")
+            _record_extraction(kb, "IX1", "v1", "extr-ix1", blocks=1)
+            vault = os.path.join(temp_dir(), "vault")
+            os.makedirs(vault, exist_ok=True)
+            pub = ReadingPublisher(kb, vault, base_url="http://x:1")
+            pub.enqueue("reports", "IX1", "v1", "extr-ix1")
+            pub.consume()
+            index_path = os.path.join(pub.output, INDEX_NAME)
+            with open(index_path, encoding="utf-8") as handle:
+                first_index = handle.read()
+
+            # new content arrives -> derived page refreshes IN PLACE
+            _seed_version(kb, "IX2", sha="b")
+            _record_extraction(kb, "IX2", "v1", "extr-ix2", blocks=1)
+            pub.enqueue("reports", "IX2", "v1", "extr-ix2")
+            outcome = pub.rebuild_index()
+            self.assertEqual(outcome["outcome"], "refreshed")
+            with open(index_path, encoding="utf-8") as handle:
+                second_index = handle.read()
+            self.assertNotEqual(first_index, second_index)
+            self.assertEqual(
+                len([f for f in os.listdir(pub.output)
+                     if f.startswith(INDEX_NAME + ".candidate")]), 0,
+                "untouched derived page forked a candidate")
+
+            # hand the recorded identity to a foreign SYSTEM writer (the
+            # one-time exporter scenario) with the disk file untouched:
+            # refresh still applies - hash proof, not owner, decides
+            manifest = _load_manifest(pub.output)
+            entry = manifest["files"][INDEX_NAME]
+            entry["owner"] = "existing-text-export"
+            from knowledge.writeback import _save_manifest
+            _save_manifest(pub.output, manifest)
+            _seed_version(kb, "IX3", sha="c")
+            _record_extraction(kb, "IX3", "v1", "extr-ix3", blocks=1)
+            outcome = pub.rebuild_index()
+            self.assertEqual(outcome["outcome"], "refreshed")
+
+            # human edits the index -> candidate path, main file intact
+            with open(index_path, "a", encoding="utf-8") as handle:
+                handle.write("\n人工置顶\n")
+            outcome = pub.rebuild_index()
+            self.assertEqual(outcome["outcome"], "preserved_with_candidate")
+            with open(index_path, encoding="utf-8") as handle:
+                self.assertIn("人工置顶", handle.read())
+
+            # note files stay append-only: a changed note NEVER replaces
+            # the main file even untouched (no refreshable for notes)
+            from knowledge.reading import reading_filename
+
+            note = os.path.join(
+                pub.output, reading_filename("reports", "IX1", "extr-ix1"))
+            manifest = _load_manifest(pub.output)
+            manifest["files"][os.path.basename(note)]["owner"] = "old-owner"
+            _save_manifest(pub.output, manifest)
+            with open(note, "w", encoding="utf-8") as handle:
+                handle.write("machine regeneration differs\n")
+            from knowledge.writeback import write_candidate
+
+            result = write_candidate(pub.output, os.path.basename(note),
+                                     "machine regeneration differs v2\n",
+                                     owner="reading-publisher")
+            self.assertEqual(result["outcome"], "preserved_with_candidate")
+        finally:
+            kb.close()
+
+
 class B2AnalysisTasksTest(unittest.TestCase):
     def test_ready_only_registration_blocked_without_model(self):
         from knowledge.analysis_tasks import (STATUS_BLOCKED, STATUS_DONE,
