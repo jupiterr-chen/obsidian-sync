@@ -103,3 +103,11 @@
 
 - 一次性阅读副本导出的 CRLF/NUL 处理作为回归保持（test_fourth_review 阅读路径测试继续通过），未扩大重构。
 - F0 通过≠自动解析/分析上线；下一步接 docs/25 的 A 阶段。
+
+## A–E 交付链上线（2026-10-05，基线 a2407d1 → 5b3fb75）
+
+按 docs/25 交付次序完成 A（自动解析+阅读发布）、B/C（管线真实、模型保持关闭、blocked 如实记录）、D（背景包 API+参考客户端）、E（ops 工具）。334 tests OK（2 skipped）。生产五容器（含新 knowledge-worker）运行；详见[交付报告](ABCDE-DELIVERY-20261005.md)。
+
+- 生产实证：缺正文 15→4（A2 有界修复）；publish_outbox 526 消费 0 待处理；阅读索引/状态页经哈希证明原地刷新并同步到 Windows；228 条分析任务 blocked(model_disabled)；0 新增模型调用。
+- 部署期发现并修复（各有回归）：真 HTTP background-package 500；CLI repair-queue/ops-status 崩溃；worker 阅读段 SELECT 不存在列；派生索引被 S02 规则冻结（新增 refreshable 刷新路径，人工编辑仍走候选保护）；syncthing pinned 镜像被误写后已恢复。
+- 未完成不虚构：B/C 生成侧待模型授权；B4 质量验收 NOT_RUN；D 真实目标应用集成待接入；7 天观察自 2026-10-05 起累计。

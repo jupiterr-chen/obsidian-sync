@@ -1,8 +1,10 @@
 # 会话检查点 / HANDOFF
 
-> **当前首任务：F0 bug fix（待执行）**，详见[docs/26](../26-bugfix-first-taskbook.md)。V01–V04及CLI snapshot_root统一前置，完成后按F0→A→B→C→D推进。较早“分散在能力启用前”的安排被此条更新；不重做迁移。
+> **当前状态（2026-10-05）：A–E 交付链已上线**，详见[交付报告](ABCDE-DELIVERY-20261005.md)与[readiness log](release-readiness-log.md)。五容器运行（含新 knowledge-worker，间隔 30 分钟增量周期）；缺正文 15→4；阅读入口自动发布并已同步 Windows；228 条分析任务 blocked(model_disabled)；0 新增模型调用。下一步可选：B/C 模型启用（需用户授权 provider/范围/预算）、D 目标应用接入、7 天观察累计。
 
-> **最新目标交付链：** [docs/25](../25-target-workflow-delivery.md)：A自动解析与阅读 → B单篇LLM分析 → C知识总结 → D投资框架接入，E稳态运维并行。当前只完成迁移与已有正文一次性阅读导出，A/B端到端尚未上线。修复按能力启用节点纳入，不重做迁移。
+> **F0 bug fix 已完成（2026-10-04，a2407d1）**，见[docs/26](../26-bugfix-first-taskbook.md)与[readiness log](release-readiness-log.md)。V01–V04 与 CLI snapshot_root 全部修复，探针 ALL-PASS。
+
+> **目标交付链：** [docs/25](../25-target-workflow-delivery.md)：A自动解析与阅读（已上线）→ B单篇LLM分析（管线就绪、模型关闭）→ C知识总结（同）→ D投资框架接入（API+客户端就绪、待真实应用）→ E稳态运维（ops_status/心跳已上线）。
 
 > 2026-10-04 已补 Obsidian `解析正文/开始阅读.md`：512份已有正文及15份缺正文清单，见[阅读交付](TEXT-READING-20261004.md)。本次仅导出已有数据，未启动全文增量worker。
 
