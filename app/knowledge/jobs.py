@@ -139,11 +139,19 @@ class JobRunner:
         self.kb.register_job(source, doc_id, version_id, STAGE_EXTRACT,
                              self.extract_digest)
 
-    def run_extract_jobs(self, limit: Optional[int] = None) -> Dict[str, Any]:
-        """Extract pending snapshot versions into evidence blocks."""
+    def run_extract_jobs(self, limit: Optional[int] = None,
+                         historical: bool = False) -> Dict[str, Any]:
+        """Extract pending snapshot versions into evidence blocks.
+
+        A1: incremental by default - only NEW snapshots (no extract job at
+        any digest) are registered. ``historical=True`` re-registers the
+        whole corpus under the current recipe and is a separate, explicit
+        operation (budgeted, authorized), never a worker default.
+        """
         registered = 0
         if STAGE_EXTRACT in self.config.register_stages:
-            for row in self.kb.snapshots_missing_extract_jobs(self.extract_digest):
+            for row in self.kb.snapshots_missing_extract_jobs(
+                    self.extract_digest, new_only=not historical):
                 if self.kb.register_job(row["source"], row["doc_id"], row["version_id"],
                                         STAGE_EXTRACT, self.extract_digest):
                     registered += 1

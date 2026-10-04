@@ -20,7 +20,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("sync", "run-snapshots", "run-extracts", "rebuild-index",
                  "serve-kb", "worker", "status", "sample", "measure",
-                 "evidence-links", "export-analysis"):
+                 "evidence-links", "export-analysis", "repair-queue"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
         if name in ("run-snapshots", "run-extracts"):
@@ -33,6 +33,11 @@ def main(argv=None) -> int:
         if name == "rebuild-index":
             child.add_argument("--force", action="store_true",
                                help="rebuild even when the manifest is unchanged")
+        if name == "repair-queue":
+            child.add_argument("--max", type=int, default=25,
+                               help="bounded repair queue size (A2)")
+            child.add_argument("--register", action="store_true",
+                               help="register extract jobs for the queue")
         if name == "evidence-links":
             child.add_argument("--source", required=True)
             child.add_argument("--doc-id", required=True)
@@ -120,6 +125,30 @@ def main(argv=None) -> int:
             worker.stop()
         return 0
 
+    if args.command == "repair-queue":
+        from knowledge.repair import build_repair_queue, register_repair_jobs
+        from knowledge.extract import extract_config_digest
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            if getattr(args, "register", False):
+                result = register_repair_jobs(
+                    kb, extract_config_digest(
+                        config.ocr_config(),
+                        config.extra.get("providers") or {}),
+                    max_items=getattr(args, "max", 25))
+            else:
+                queue = build_repair_queue(
+                    kb, max_items=getattr(args, "max", 25))
+                result = {"queue_size": len(queue), "items": [
+                    {"source": i["source"], "doc_id": i["doc_id"],
+                     "version_id": i["version_id"],
+                     "extraction_status": i["extraction_status"],
+                     "readable_blocks": i["readable"]} for i in queue]}
+        finally:
+            kb.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "rebuild-index":
         from .indexing import build_generation
         from .store import KnowledgeStore

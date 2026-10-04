@@ -19,6 +19,7 @@ from library.config import Config
 from library.locking import FileLock
 
 from .config import KnowledgeConfig
+from .extract import STAGE_EXTRACT
 from .indexing import build_generation
 from .jobs import JobRunner
 from .memory import impact_analysis
@@ -49,6 +50,12 @@ def consume_impact_outbox(kb, limit: int = 25) -> int:
                              row["version_id"])
             created += len(impact["new_proposals"])
             kb.mark_impact_consumed(row["id"])
+
+
+def _extraction_for(kb, row) -> Optional[str]:
+    extraction = kb.latest_extraction(row["source"], row["doc_id"],
+                                      row["version_id"])
+    return extraction["extraction_id"] if extraction else None
 
 
 def worker_state_path(knowledge_db: str) -> str:
@@ -86,18 +93,91 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             return {"ok": False, "skipped": True,
                     "reason": "another knowledge command holds the lock"}
         try:
-            runner = JobRunner(kb, config, library_config)
+            # the worker owns extraction: ensure the extract stage is
+            # registered even if the config only lists snapshot
+            import copy as _copy
+
+            worker_config = _copy.deepcopy(config)
+            stages = list(worker_config.register_stages or ("snapshot",))
+            if STAGE_EXTRACT not in stages:
+                stages.append(STAGE_EXTRACT)
+            worker_config.register_stages = tuple(stages)
+            runner = JobRunner(kb, worker_config, library_config)
             sync = SyncService(kb, config)
             cycle["sync"] = sync.run()
             cycle["snapshots"] = runner.run_snapshot_jobs()
+
+            # A2: bounded repair lane runs BEFORE extraction so its
+            # re-registrations process in the same cycle
+            from .repair import register_repair_jobs
+            cycle["repair"] = register_repair_jobs(
+                kb, runner.extract_digest, max_items=10)
+
             cycle["extracts"] = runner.run_extract_jobs()
             cycle["index"] = build_generation(kb)
+
+            # A3: extraction commits become durable pending publishes; the
+            # reading consumer renders notes + index after the (possibly
+            # new) generation is live. Vault dir may be absent on hosts
+            # that only run extraction - publishing is then skipped and
+            # the outbox stays pending (consumed by the node that owns
+            # the vault).
+            vault_dir = (config.extra or {}).get("vault_dir")
+            if vault_dir and os.path.isdir(vault_dir):
+                from .reading import ReadingPublisher
+
+                publisher = ReadingPublisher(
+                    kb, vault_dir,
+                    (config.extra or {}).get(
+                        "public_base_url", "http://192.168.1.150:8765"))
+                with kb._tx() as conn:
+                    done = conn.execute(
+                        "SELECT source, doc_id, version_id, extraction_id"
+                        " FROM jobs WHERE stage='extract' AND status='done'"
+                        " AND updated_at >= ?", (cycle["started_at"],)).fetchall()
+                    for row in done:
+                        publisher.enqueue(row["source"], row["doc_id"],
+                                          row["version_id"],
+                                          None or _extraction_for(kb, row))
+                cycle["reading"] = publisher.consume()
+            else:
+                cycle["reading"] = {"skipped": True,
+                                    "reason": "vault_dir not configured"}
 
             # A20 hooks (R15): durable outbox drives impact analysis -
             # paged until empty, no time-stamp heuristics, crash-safe.
             proposals = consume_impact_outbox(kb,
                                               limit=max_impact_versions)
             cycle["impact_proposals"] = proposals
+
+            # B2: register analysis tasks for READY current extractions;
+            # with models disabled they are recorded as blocked (never
+            # silently queued for a paid call)
+            from .analysis_tasks import (register_ready_analysis_tasks,
+                                         task_counts)
+            cycle["analysis_tasks"] = register_ready_analysis_tasks(kb)
+            cycle["analysis_task_counts"] = task_counts(kb)
+
+            # C: entities whose evidence changed (new claims/updates from
+            # the impact lane) queue a summary revision; generation is
+            # blocked until a provider is authorized
+            from .summaries import consume_updates, enqueue_summary_update
+            for proposal in kb.list_review_proposals(status="open"):
+                detail = proposal.get("detail") or {}
+                subject = None
+                with kb._lock:
+                    claim = kb._conn.execute(
+                        "SELECT subject FROM claims WHERE claim_id=?",
+                        (proposal["claim_id"],)).fetchone()
+                    subject = claim["subject"] if claim else None
+                if subject:
+                    enqueue_summary_update(
+                        kb, "company", subject,
+                        "evidence_changed",
+                        {"proposal_id": proposal["proposal_id"],
+                         "source": detail.get("source"),
+                         "doc_id": detail.get("doc_id")})
+            cycle["summaries"] = consume_updates(kb)
             cycle["counts"] = kb.counts()
             generation = kb.active_generation()
             cycle["generation_id"] = generation["generation_id"] if generation else None

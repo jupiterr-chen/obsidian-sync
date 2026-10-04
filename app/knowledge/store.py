@@ -259,6 +259,18 @@ CREATE TABLE IF NOT EXISTS impact_outbox (
     consumed_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_impact_outbox_status ON impact_outbox(status);
+CREATE TABLE IF NOT EXISTS publish_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    extraction_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending | consumed
+    created_at TEXT NOT NULL,
+    consumed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_publish_outbox_status
+    ON publish_outbox(status);
 CREATE TABLE IF NOT EXISTS review_proposals (
     proposal_id TEXT PRIMARY KEY,
     claim_id TEXT NOT NULL,
@@ -1348,14 +1360,26 @@ class KnowledgeStore:
         }
         return item
 
-    def snapshots_missing_extract_jobs(self, stage_digest: str) -> List[Dict[str, Any]]:
-        """Snapshot bindings that have no extract job for this stage digest."""
+    def snapshots_missing_extract_jobs(self, stage_digest: str,
+                                       new_only: bool = True) -> List[Dict[str, Any]]:
+        """Snapshot bindings needing an extract job under the current recipe.
+
+        A1: with new_only (the default) only snapshots that have NO extract
+        job under ANY digest are registered - a recipe change does not
+        silently re-queue the historical corpus. Historical re-extraction
+        is an explicit, separately-authorized pass (register_all under a
+        dedicated command), not a side effect of the incremental worker.
+        """
+        predicate = (
+            " AND j.stage='extract'" if new_only
+            else " AND j.stage='extract' AND j.config_digest=?")
+        params: tuple = () if new_only else (stage_digest,)
         with self._lock:
             rows = self._conn.execute(
                 "SELECT s.source, s.doc_id, s.version_id, s.sha256 FROM snapshots s"
                 " WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.source=s.source"
                 " AND j.doc_id=s.doc_id AND j.version_id=s.version_id"
-                " AND j.stage='extract' AND j.config_digest=?)", (stage_digest,)
+                + predicate + ")", params
             ).fetchall()
         return [dict(r) for r in rows]
 

@@ -468,6 +468,14 @@ class KbApi:
             "usage": usage, "error": run.get("error"),
         }
 
+    def build_background_package(self, entity_type: str, entity_id: str,
+                                 as_of: Optional[str] = None,
+                                 as_of_mode: str = "system") -> Dict[str, Any]:
+        from .background import build_background_package
+
+        return build_background_package(self.kb, entity_type, entity_id,
+                                        as_of=as_of, as_of_mode=as_of_mode)
+
     # ---------------------------------------------------------------- memory
     def list_claims(self, status: Optional[str] = None) -> Dict[str, Any]:
         return {"claims": self.kb.list_claims(status=status)}
@@ -641,6 +649,24 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, self.api.review_claim_route(
                         route[1], self._read_json_body()), head_only)
                 raise KbApiError(404, "not_found", "not found")
+
+            if route[:1] == ["background-package"] and self.command == "POST":
+                self.api.authenticate(self._bearer(), PERM_READ)
+                body = self._read_json_body()
+                entity_type = body.get("entity_type")
+                entity_id = body.get("entity_id")
+                if entity_type not in ("company", "topic") or not entity_id:
+                    raise KbApiError(400, "invalid_entity",
+                                     "entity_type (company|topic) and"
+                                     " entity_id are required")
+                from .background import build_background_package
+
+                package = build_background_package(
+                    self.kb, entity_type, entity_id,
+                    as_of=(body.get("filters") or {}).get("as_of"),
+                    as_of_mode=(body.get("filters") or {}).get(
+                        "as_of_mode", "system"))
+                return self._send(200, package, head_only)
 
             if route[:1] == ["memory-proposals"] and len(route) == 3 \
                     and route[2] == "review" and self.command == "POST":
