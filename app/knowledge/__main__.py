@@ -137,6 +137,7 @@ def main(argv=None) -> int:
     if args.command == "repair-queue":
         from knowledge.repair import build_repair_queue, register_repair_jobs
         from knowledge.extract import extract_config_digest
+        from knowledge.store import KnowledgeStore
 
         kb = KnowledgeStore(config.knowledge_db)
         try:
@@ -180,7 +181,7 @@ def main(argv=None) -> int:
         kb = KnowledgeStore(config.knowledge_db)
         try:
             def q(sql, params=()):
-                return kb.conn.execute(sql, params).fetchall()
+                return kb._conn.execute(sql, params).fetchall()
 
             jobs = q("SELECT stage, status, COUNT(*) c FROM jobs"
                      " GROUP BY stage, status ORDER BY stage, status")
@@ -198,8 +199,9 @@ def main(argv=None) -> int:
                     outboxes[table] = {r["status"]: r["c"] for r in row}
                 except sqlite3.OperationalError:
                     outboxes[table] = "missing"
-            gen = q("SELECT id, status, built_at, documents FROM"
-                    " index_generations ORDER BY id DESC LIMIT 1")
+            gen = q("SELECT generation_id, status, activated_at FROM"
+                    " index_generations WHERE status='active'"
+                    " ORDER BY created_at DESC LIMIT 1")
             result = {"ok": True, "window": window,
                       "jobs": [{"stage": r["stage"], "status": r["status"],
                                 "count": r["c"]} for r in jobs],

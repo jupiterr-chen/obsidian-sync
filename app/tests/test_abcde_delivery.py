@@ -345,5 +345,46 @@ class DBackgroundPackageTest(unittest.TestCase):
             kb.close()
 
 
+class ECliCommandsTest(unittest.TestCase):
+    """The A2/A3/E CLI subcommands must actually run - deployment caught
+    repair-queue crashing on a missing KnowledgeStore import and
+    ops-status on kb.conn/index_generations.id that never existed."""
+
+    def test_cli_repair_publish_ops(self):
+        from knowledge import __main__ as cli
+        from knowledge.analysis_tasks import ensure_schema
+        from knowledge.store import KnowledgeStore
+
+        kb = _kb()
+        config_path = None
+        try:
+            ensure_schema(kb)
+            _seed_version(kb, "CLI1")
+            _record_extraction(kb, "CLI1", "v1", "extr-cli1", blocks=1,
+                               status="ready")
+            db = kb.knowledge_db if hasattr(kb, "knowledge_db") else None
+        finally:
+            db = db or kb._conn.execute(
+                "PRAGMA database_list").fetchone()["file"]
+            kb.close()
+        vault = os.path.join(temp_dir(), "vault")
+        os.makedirs(vault, exist_ok=True)
+        config_path = os.path.join(temp_dir(), "knowledge.json")
+        with open(config_path, "w", encoding="utf-8") as handle:
+            json.dump({"knowledge_db": db,
+                       "snapshot_root": os.path.join(temp_dir(), "snaps"),
+                       "vault_dir": vault}, handle)
+
+        self.assertEqual(cli.main(["repair-queue", "--config", config_path,
+                                   "--max", "5"]), 0)
+        self.assertEqual(cli.main(["publish-reading", "--config", config_path,
+                                   "--vault-dir", vault]), 0)
+        self.assertTrue(os.path.exists(
+            os.path.join(vault, "解析正文", "开始阅读.md")))
+        self.assertTrue(os.path.exists(
+            os.path.join(vault, "解析正文", "处理状态.md")))
+        self.assertEqual(cli.main(["ops-status", "--config", config_path]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
