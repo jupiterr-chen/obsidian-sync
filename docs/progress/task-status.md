@@ -1,5 +1,7 @@
 # 任务台账
 
+> **2026-10-05 第二批（最新）：N1–N5 限范围开发完成并推送（[开发报告](N12345-DEV-20261005.md)，commit 9fbf1ab）。** 验收探针 6/6 全绿、全回归 364 OK、零生产变更/零模型调用；B/C 为 fake-provider 离线闭环（真实质量待授权），D 时间语义已实现（真实应用未接入），N5 修复已备未部署。**当前停在"待 Codex AC1 独立验收 + 用户发布授权"，未自行上线。**
+
 > **2026-10-05 最新独立验收：部分可用，整体未完成。** [验收报告](ABCDE-ACCEPTANCE-20261005.md)：336项回归（334通过、2 skipped）；正文worker运行，服务器/Windows 523链接0断链；B/C缺执行与发布闭环，D历史背景as_of未生效。Q01–Q05按功能修复，不重做迁移/不停阅读。见[任务书](../27-abcde-acceptance-taskbook.md)和[提示词](../28-abcde-next-agent-prompt.md)。后续必须先接收Codex独立验收任务并验收通过，再取得用户明确生产部署授权；开发/self-test/push不授权部署。
 
 以下为历史过程与提交者声明；与最新独立验收冲突时，以最新验收为准。
@@ -23,6 +25,11 @@
 
 |任务|状态|负责人|依赖|commit|验收报告|阻塞|下一动作|
 |---|---|---|---|---|---|---|---|
+|N1 历史背景时间过滤 Q01|dev-done、待Codex验收|main-agent|验收基线 c537b2a|c9032a7|N12345-DEV-20261005.md|AC1+发布授权|Codex AC1|
+|N2 分析任务/执行器 Q02|dev-done（fake provider 闭环）、真实质量待授权|main-agent|N4|0ceb43d|同上|模型授权（provider/范围/预算）|AC1 后按授权小批|
+|N3 总结闭环+事件去重 Q03|dev-done（fake provider 闭环）、真实质量待授权|main-agent|N2|9fbf1ab|同上|同上|AC1|
+|N4 预算重试计数 Q05|dev-done、待Codex验收|main-agent|—|3df6742|同上|AC1+发布授权|AC1|
+|N5 分批发布断链 Q04|dev-done、待部署（线上低概率窗口未消）|main-agent|—|a8f4d8a|同上|AC1+发布授权|AC1|
 |A1 增量知识处理（worker）|部分验收：正常周期已核实|main-agent|F0|b4fcde1..5b3fb75|ABCDE-ACCEPTANCE-20261005.md|真实新增来源端到端NOT_RUN|补隔离新增/更新/重启验收|
 |A2 有界修复队列|部分验收：当前缺正文4|main-agent|A1|同上|同上|真实质量与失败恢复待专项验收|有界补证据，不全库重跑|
 |A3/A4 自动阅读发布+入口|当前523链接通过；Q04待修|main-agent|A1|c8b088a|同上|积压分批时短暂断链|N5小修，保持现有阅读|
