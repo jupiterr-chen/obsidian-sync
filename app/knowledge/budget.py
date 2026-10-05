@@ -137,9 +137,15 @@ class BudgetLedger:
                            budget.max_total_input_tokens))
                 if kind == "http-attempt" \
                         and budget.max_requests_total is not None \
-                        and totals["dispatched_attempts"] + totals["requests"] \
-                        + 1 > budget.max_requests_total:
-                    # retries need their own slot under the SAME cap
+                        and totals["requests"] + 1 > budget.max_requests_total:
+                    # N4/Q05: `requests` already counts every dispatched
+                    # physical request exactly once - failed attempts
+                    # persist usage rows with counts_request=1, a
+                    # successful call's settled business row is its
+                    # request of record, and open reservations with
+                    # counts_request=1 are in flight. Adding
+                    # dispatched_attempts on top double-counted one failed
+                    # attempt and blocked the legal retry under cap=2.
                     raise BudgetExceeded("budget_exceeded_max_requests")
                 if (count_request
                         and budget.max_requests_total is not None
