@@ -662,6 +662,18 @@ class Handler(BaseHTTPRequestHandler):
                     raise KbApiError(400, "invalid_entity",
                                      "entity_type (company|topic) and"
                                      " entity_id are required")
+                # N1: a malformed as_of/as_of_mode answers 400 - never a
+                # silently unfiltered "current" package labelled historical
+                from .background import _parse_cutoff
+
+                try:
+                    _parse_cutoff((body.get("filters") or {}).get("as_of"))
+                except ValueError as exc:
+                    raise KbApiError(400, "invalid_as_of", str(exc))
+                if (body.get("filters") or {}).get(
+                        "as_of_mode", "system") not in ("system", "public"):
+                    raise KbApiError(400, "invalid_as_of_mode",
+                                     "as_of_mode must be system|public")
                 package = self.api.build_background_package(
                     entity_type, entity_id,
                     as_of=(body.get("filters") or {}).get("as_of"),
