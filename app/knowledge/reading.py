@@ -78,11 +78,15 @@ def render_reading_note(title: str, source: str, doc_id: str,
 
 
 def render_index(entries: List[str], absent: List[str],
-                 published: int, without_text: int) -> str:
+                 published: int, without_text: int,
+                 pending_publish: int = 0) -> str:
+    pending_note = ("；另有 %d 份正文待发布（下一轮自动完成）" % pending_publish
+                    if pending_publish else "")
     lines = ["# 解析正文目录", "",
              "这里显示服务器已经保存的最新提取正文；新增研报处理完成后自动更新。",
              "原来的“资料目录”卡片仍负责元数据和原文访问。人工研究请写在原人工区，不要直接改本生成区。", "",
-             "**正文 %d 份；当前版本缺少正文 %d 份。**" % (published, without_text), "",
+             "**正文 %d 份%s；当前版本缺少正文 %d 份。**" % (
+                 published, pending_note, without_text), "",
              "ready：机器检查通过；review：需要复核；failed：提取失败或不完整。它们都不等于人工确认正确。", "",
              "## 已有正文", ""]
     lines += entries
@@ -170,10 +174,16 @@ class ReadingPublisher:
         return True
 
     def rebuild_index(self) -> Dict[str, Any]:
-        """Regenerate 开始阅读.md from current versions (read-only scan)."""
+        """Regenerate 开始阅读.md from current versions (read-only scan).
+
+        N5/Q04: a note is only LINKED when its file is on disk. Batches
+        are bounded (consume(limit)), so notes still queued for publish
+        render as 待发布 with the original-document link instead of a
+        dangling markdown link; the next consume completes them.
+        """
         entries: List[str] = []
         absent: List[str] = []
-        published = without = 0
+        published = pending_publish = without = 0
         with self.kb._lock:
             versions = self.kb._conn.execute(
                 "SELECT v.source, v.doc_id, v.version_id, d.title"
@@ -203,12 +213,21 @@ class ReadingPublisher:
                     absent.append("- %s — %s；[原文](%s)" % (
                         literal(title), extraction["status"], url))
                     continue
-                published += 1
                 name = reading_filename(version["source"], version["doc_id"],
                                         extraction["extraction_id"])
+                if not os.path.isfile(os.path.join(self.output, name)):
+                    # text exists but this batch has not published the
+                    # note yet: visible as pending, never a dead link
+                    pending_publish += 1
+                    entries.append(
+                        "- %s — 待发布（下一轮自动发布）；[原文](%s)" % (
+                            literal(title), url))
+                    continue
+                published += 1
                 entries.append("- [%s](%s) — %s" % (
                     literal(title), name, extraction["status"]))
-        content = render_index(entries, absent, published, without)
+        content = render_index(entries, absent, published, without,
+                               pending_publish)
         # index/status pages are fully derived: refreshable lets the entry
         # switch as content changes, guarded by the manifest hash proof
         # (any human edit forces the candidate path instead)
@@ -226,5 +245,5 @@ class ReadingPublisher:
                                          owner="reading-publisher",
                                          refreshable=True)
         return {"outcome": outcome["outcome"], "published": published,
-                "without_text": without,
+                "without_text": without, "pending_publish": pending_publish,
                 "status_outcome": status_outcome["outcome"]}
