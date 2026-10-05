@@ -2,9 +2,9 @@
 
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
 
-当前交付：**2026-10-04基础迁移与旧栈停机完成。** 新栈数据、恢复、原文、旧证据、三连跑和Windows同步验收通过。第一层每小时同步正常；知识自动worker、远程模型和自动候选仍暂缓。见[迁移报告与入口](docs/progress/MIGRATION-20261004.md)及[后续fix清单](docs/23-fifth-review-taskbook.md)。
+当前交付：基础迁移和旧栈停机已完成，知识worker与正文阅读运行；服务器和Windows目录523条正文链接无断链。**A–E整体尚未验收：B/C消费者与发布未接通，D历史背景过滤需修复。** 见[2026-10-05独立验收](docs/progress/ABCDE-ACCEPTANCE-20261005.md)。
 
-下一阶段先执行[ F0 bug fix](docs/26-bugfix-first-taskbook.md)，再按[目标交付链](docs/25-target-workflow-delivery.md)推进：自动解析与阅读 → 单篇LLM分析 → 公司/主题知识总结 → 投资框架接入。
+下一步按[限范围任务书](docs/27-abcde-acceptance-taskbook.md)与[开发agent提示词](docs/28-abcde-next-agent-prompt.md)推进。开发完成必须先接收Codex独立验收任务并通过验收，再获得用户对该次发布的明确授权，才能部署生产。旧迁移授权不沿用。
 
 ## 阅读顺序
 

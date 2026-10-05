@@ -1,6 +1,10 @@
 # 会话检查点 / HANDOFF
 
-> **当前状态（2026-10-05）：A–E 交付链已上线**，详见[交付报告](ABCDE-DELIVERY-20261005.md)与[readiness log](release-readiness-log.md)。五容器运行（含新 knowledge-worker，间隔 30 分钟增量周期）；缺正文 15→4；阅读入口自动发布并已同步 Windows；228 条分析任务 blocked(model_disabled)；0 新增模型调用。下一步可选：B/C 模型启用（需用户授权 provider/范围/预算）、D 目标应用接入、7 天观察累计。
+> **2026-10-05 最新独立验收：部分可用，整体未完成。** [验收报告](ABCDE-ACCEPTANCE-20261005.md)：336项回归（334通过、2 skipped）；正文worker运行，服务器/Windows 523链接0断链；B/C缺执行与发布闭环，D历史背景as_of未生效。Q01–Q05按功能修复，不重做迁移/不停阅读。见[任务书](../27-abcde-acceptance-taskbook.md)和[提示词](../28-abcde-next-agent-prompt.md)。后续必须先接收Codex独立验收任务并验收通过，再取得用户明确生产部署授权；开发/self-test/push不授权部署。
+
+以下为历史过程与提交者声明；与最新独立验收冲突时，以最新验收为准。
+
+> **提交者历史声明（2026-10-05，已由上方独立验收修正）：A–E 交付链已上线**，详见[交付报告](ABCDE-DELIVERY-20261005.md)与[readiness log](release-readiness-log.md)。五容器运行（含新 knowledge-worker，间隔 30 分钟增量周期）；缺正文 15→4；阅读入口自动发布并已同步 Windows；228 条分析任务 blocked(model_disabled)；0 新增模型调用。下一步可选：B/C 模型启用（需用户授权 provider/范围/预算）、D 目标应用接入、7 天观察累计。
 
 > **F0 bug fix 已完成（2026-10-04，a2407d1）**，见[docs/26](../26-bugfix-first-taskbook.md)与[readiness log](release-readiness-log.md)。V01–V04 与 CLI snapshot_root 全部修复，探针 ALL-PASS。
 

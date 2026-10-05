@@ -1,6 +1,10 @@
 # 任务台账
 
-> **当前状态（2026-10-05）：A–E 交付链已上线**（[交付报告](ABCDE-DELIVERY-20261005.md)）。A 全链路生产运行（增量 worker/有界修复/自动阅读发布/状态页，缺正文 15→4）；B/C 管线就绪、模型保持关闭（228 任务 blocked）；D API+参考客户端就绪、待目标应用接入；E ops 工具运行中。B/C 启用需用户授权；7 天观察自 2026-10-05 起累计。
+> **2026-10-05 最新独立验收：部分可用，整体未完成。** [验收报告](ABCDE-ACCEPTANCE-20261005.md)：336项回归（334通过、2 skipped）；正文worker运行，服务器/Windows 523链接0断链；B/C缺执行与发布闭环，D历史背景as_of未生效。Q01–Q05按功能修复，不重做迁移/不停阅读。见[任务书](../27-abcde-acceptance-taskbook.md)和[提示词](../28-abcde-next-agent-prompt.md)。后续必须先接收Codex独立验收任务并验收通过，再取得用户明确生产部署授权；开发/self-test/push不授权部署。
+
+以下为历史过程与提交者声明；与最新独立验收冲突时，以最新验收为准。
+
+> **提交者历史声明（2026-10-05，已由上方独立验收修正）：A–E 交付链已上线**（[交付报告](ABCDE-DELIVERY-20261005.md)）。A 全链路生产运行（增量 worker/有界修复/自动阅读发布/状态页，缺正文 15→4）；B/C 管线就绪、模型保持关闭（228 任务 blocked）；D API+参考客户端就绪、待目标应用接入；E ops 工具运行中。B/C 启用需用户授权；7 天观察自 2026-10-05 起累计。
 
 > **最新目标交付链：** [docs/25](../25-target-workflow-delivery.md)：A自动解析与阅读 → B单篇LLM分析 → C知识总结 → D投资框架接入，E稳态运维并行。当前只完成迁移与已有正文一次性阅读导出，A/B端到端尚未上线。修复按能力启用节点纳入，不重做迁移。
 
@@ -19,13 +23,13 @@
 
 |任务|状态|负责人|依赖|commit|验收报告|阻塞|下一动作|
 |---|---|---|---|---|---|---|---|
-|A1 增量知识处理（worker）|accepted（生产运行）|main-agent|F0|b4fcde1..5b3fb75|ABCDE-DELIVERY-20261005.md|无|7天观察累计|
-|A2 有界修复队列|accepted（生产：15→4）|main-agent|A1|同上|同上|1份快照缺失不可修复|继续下周期消化|
-|A3/A4 自动阅读发布+入口|accepted（生产：526消费/0待）|main-agent|A1|c8b088a（refreshable）|同上|无|新内容随周期自动发布|
-|B2 单篇分析任务|pipeline-real、生成BLOCKED(model_disabled)|main-agent|A|同上|同上|用户授权provider/范围/预算|授权后启用+小批质量验收|
-|C 版本化知识总结|pipeline-real、生成BLOCKED(model_disabled)|main-agent|B|同上|同上|同上|同上|
-|D 背景包API+客户端|accepted（API实测）；真实应用集成BLOCKED|main-agent|A|b95f06d|同上|目标应用接入+服务器联通配置|框架侧接入后走完查询→决策→重放|
-|E 稳态运维工具|accepted（生产运行）|main-agent|—|5b3fb75|同上|无|周期快照+7天观察累计|
+|A1 增量知识处理（worker）|部分验收：正常周期已核实|main-agent|F0|b4fcde1..5b3fb75|ABCDE-ACCEPTANCE-20261005.md|真实新增来源端到端NOT_RUN|补隔离新增/更新/重启验收|
+|A2 有界修复队列|部分验收：当前缺正文4|main-agent|A1|同上|同上|真实质量与失败恢复待专项验收|有界补证据，不全库重跑|
+|A3/A4 自动阅读发布+入口|当前523链接通过；Q04待修|main-agent|A1|c8b088a|同上|积压分批时短暂断链|N5小修，保持现有阅读|
+|B2 单篇分析任务|部分实现；生成/发布未接通|main-agent|A|同上|同上|Q02/Q05及真实模型授权|N2/N4离线闭环后独立验收|
+|C 版本化知识总结|部分实现；生成/发布未接通|main-agent|B|同上|同上|缺实体初次发现/消费者；Q03|N3与B衔接|
+|D 背景包API+客户端|未通过历史语义验收|main-agent|A|b95f06d|同上|Q01；真实应用未接入|N1修复或显式拒绝历史模式|
+|E 稳态运维工具|心跳核实；完整E待验收|main-agent|—|5b3fb75|同上|周期备份/恢复/告警/7天证据不足|准备隔离证据和授权后的上线计划|
 |M0 源工程整合|accepted（源码+离线验证）|main-agent|P0|0f3a19f|docs/progress/m0-report.md|无|无，已完成|
 |P0 设计基线|accepted|前序会话|无|a26f8f2/7cf9578|docs/10-p0-validation.md|无|无|
 |P1-01 library接口核对|accepted（离线审计）|main-agent|M0|2889a12|docs/progress/p1-01-interface-audit.md|真实A01需源访问|已完成|
