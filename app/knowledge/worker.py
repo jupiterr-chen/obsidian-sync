@@ -82,8 +82,16 @@ def read_state(path: str) -> Optional[Dict[str, Any]]:
 
 
 def run_cycle(config: KnowledgeConfig, library_config: Config,
-              max_impact_versions: int = 25) -> Dict[str, Any]:
-    """One full knowledge cycle. Idempotent; safe to run back-to-back."""
+              max_impact_versions: int = 25, chat=None, ledger=None,
+              analysis_prompt_version: str = "pv1",
+              analysis_limit: int = 5) -> Dict[str, Any]:
+    """One full knowledge cycle. Idempotent; safe to run back-to-back.
+
+    chat/ledger are the B/C provider seam: production passes None (tasks
+    register blocked, summaries defer); offline tests and authorized
+    setups inject a provider to run analysis and summarization for real.
+    No provider bytes leave without both a caller-provided provider and
+    its own egress/budget gates."""
     kb = KnowledgeStore(config.knowledge_db)
     lock = FileLock(os.path.join(os.path.dirname(config.knowledge_db) or ".",
                                  "knowledge.lock"))
@@ -172,38 +180,110 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
 
             # A20 hooks (R15): durable outbox drives impact analysis -
             # paged until empty, no time-stamp heuristics, crash-safe.
+            # N3: each NEW version also maps to its entities (symbol ->
+            # company) BEFORE consumption, so the FIRST document of a
+            # company queues a summary event - not only claims that
+            # already have review proposals.
+            from .summaries import (entities_for_document,
+                                    enqueue_summary_update)
+            doc_events = 0
+            for row in kb.pending_impacts(limit=max_impact_versions * 4):
+                for entity in entities_for_document(
+                        kb, row["source"], row["doc_id"]):
+                    if enqueue_summary_update(
+                            kb, entity["entity_type"], entity["entity_id"],
+                            "document_added",
+                            {"source": row["source"], "doc_id": row["doc_id"],
+                             "version_id": row["version_id"]},
+                            event_key="doc:%s:%s:%s" % (
+                                row["source"], row["doc_id"],
+                                row["version_id"])):
+                        doc_events += 1
             proposals = consume_impact_outbox(kb,
                                               limit=max_impact_versions)
             cycle["impact_proposals"] = proposals
+            cycle["entity_doc_events"] = doc_events
 
-            # B2: register analysis tasks for READY current extractions;
-            # with models disabled they are recorded as blocked (never
-            # silently queued for a paid call)
-            from .analysis_tasks import (register_ready_analysis_tasks,
+            # N2: analysis tasks under the configured identity; with a
+            # chat provider (tests/authorized setups) the executor runs,
+            # otherwise tasks stay blocked(model_disabled) exactly as
+            # before - enabling is an explicit step, never implicit
+            from .analysis_tasks import (PLANNED_MODEL_IDENTITY,
+                                         execute_analysis_tasks,
+                                         register_ready_analysis_tasks,
                                          task_counts)
-            cycle["analysis_tasks"] = register_ready_analysis_tasks(kb)
+            if chat is not None:
+                model_identity = "%s/%s" % (
+                    getattr(chat, "name", "chat"),
+                    getattr(chat, "model", "unknown"))
+                cycle["analysis_tasks"] = register_ready_analysis_tasks(
+                    kb, prompt_version=analysis_prompt_version,
+                    model_identity=model_identity,
+                    model_name=getattr(chat, "model", None),
+                    blocked_reason=None)
+                cycle["analysis_executed"] = execute_analysis_tasks(
+                    kb, chat, ledger=ledger,
+                    prompt_version=analysis_prompt_version,
+                    limit=analysis_limit)
+            else:
+                cycle["analysis_tasks"] = register_ready_analysis_tasks(kb)
+                cycle["analysis_executed"] = {"skipped": True,
+                                              "reason": "model_disabled"}
             cycle["analysis_task_counts"] = task_counts(kb)
 
-            # C: entities whose evidence changed (new claims/updates from
-            # the impact lane) queue a summary revision; generation is
-            # blocked until a provider is authorized
-            from .summaries import consume_updates, enqueue_summary_update
+            # N3: publish finished analyses when the worker owns a vault
+            vault_dir = (config.extra or {}).get("vault_dir")
+            if vault_dir and os.path.isdir(vault_dir):
+                from .analysis_publish import AnalysisPublisher
+
+                analysis_publisher = AnalysisPublisher(
+                    kb, vault_dir,
+                    (config.extra or {}).get(
+                        "public_base_url", "http://192.168.1.150:8765"))
+                cycle["analysis_published"] = analysis_publisher.consume()
+            else:
+                cycle["analysis_published"] = {
+                    "skipped": True, "reason": "vault_dir not configured"}
+
+            # C: entities whose evidence changed (open review proposals)
+            # queue a summary revision; each event keys on its proposal so
+            # revisiting a proposal across cycles queues exactly once
+            from .summaries import (consume_updates,
+                                    enqueue_blocked_entity_refreshes,
+                                    enqueue_summary_update,
+                                    publish_pending_summaries)
+            proposal_events = 0
             for proposal in kb.list_review_proposals(status="open"):
                 detail = proposal.get("detail") or {}
-                subject = None
                 with kb._lock:
                     claim = kb._conn.execute(
                         "SELECT subject FROM claims WHERE claim_id=?",
                         (proposal["claim_id"],)).fetchone()
-                    subject = claim["subject"] if claim else None
+                subject = claim["subject"] if claim else None
                 if subject:
-                    enqueue_summary_update(
-                        kb, "company", subject,
-                        "evidence_changed",
-                        {"proposal_id": proposal["proposal_id"],
-                         "source": detail.get("source"),
-                         "doc_id": detail.get("doc_id")})
-            cycle["summaries"] = consume_updates(kb)
+                    if enqueue_summary_update(
+                            kb, "company", subject, "evidence_changed",
+                            {"proposal_id": proposal["proposal_id"],
+                             "source": detail.get("source"),
+                             "doc_id": detail.get("doc_id")},
+                            event_key="proposal:%s" %
+                            proposal["proposal_id"]):
+                        proposal_events += 1
+            cycle["entity_proposal_events"] = proposal_events
+            # a provider enables deferred (blocked) generations to run
+            if chat is not None:
+                cycle["summary_refreshes"] = enqueue_blocked_entity_refreshes(
+                    kb)
+            cycle["summaries"] = consume_updates(kb, chat=chat,
+                                                 ledger=ledger)
+            if vault_dir and os.path.isdir(vault_dir):
+                cycle["summary_published"] = publish_pending_summaries(
+                    kb, vault_dir,
+                    (config.extra or {}).get(
+                        "public_base_url", "http://192.168.1.150:8765"))
+            else:
+                cycle["summary_published"] = {
+                    "skipped": True, "reason": "vault_dir not configured"}
             cycle["counts"] = kb.counts()
             generation = kb.active_generation()
             cycle["generation_id"] = generation["generation_id"] if generation else None
