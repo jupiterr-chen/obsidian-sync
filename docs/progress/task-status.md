@@ -1,5 +1,7 @@
 # 任务台账
 
+> **2026-10-06 第五批（最新）：SF01–SF06 完成并推送（[开发报告](SF-DEV-20261006.md)，commit db61484）。** 五份验收探针全绿（SF 6/6、TQMA 7/7、MA 3/3、AC1 7/7、原 6/6），全回归 426 OK。F4 按任务书后置。生产清单/样本/批次/归档与部署全部等待各自授权；零生产变更。
+
 > **2026-10-06独立续验0f9cb27：原23探针通过、420回归通过/2跳过，干净源码F1/S4另4项通过。S4/F1代码交付通过；S1/S2/S3/F3原任务组合条件未闭环，按原docs/34补齐SF01–SF06，不扩展范围，F4仍后置。** [续验报告](S1234-ACCEPTANCE-20261006.md)、[原任务书](../34-tqma-followup-taskbook.md)、[续验提示词](../35-tqma-followup-prompt.md)。未部署；现网67c6985r2、旧服务仍停止。生产与数据批次授权边界不变。下方为历史记录。
 
 > **2026-10-06 第四批（最新）：S1–S4 与 F1–F3 完成并推送（[开发报告](S1234-DEV-20261006.md)，commit 25a89d6）。** 四份验收探针全绿（TQMA 7/7、MA 3/3、AC1 7/7、原 6/6），全回归 420 OK。F4（C1 展示小修）按任务书后置。生产清单/样本/批次/归档与部署全部等待各自授权；零生产变更。
@@ -48,6 +50,12 @@
 |TQ1/TQ2 源头与下游质量门|todo：前置于LLM|next-agent|TQ0|—|同上|控制字符/CID路由及OCR拼接污染|隔离回归，不改生产|
 |TQ3 有界版本化重处理|todo：工具先做，生产批次待授权|next-agent|TQ1/TQ2|—|同上|新recipe/新extraction/旧证据保留|原生重提取优先，必要页OCR|
 |TQ4 Vault历史副本治理|todo：仅dry-run|next-agent|TQ0|—|同上|人工修改/引用/manifest/hash及精确授权|不自动清理，准备恢复映射|
+|SF01 主题不扩大C资料范围（文档级过滤）|dev-done、待Codex续验|main-agent|0f9cb27|db61484|SF-DEV-20261006.md|续验+模型授权|Codex续验|
+|SF02 新稿须全可用才赢得入口|dev-done、待Codex续验|main-agent|0f9cb27|db61484|同上|续验+批次授权|Codex续验|
+|SF03 全Vault wikilink/片段引用保护|dev-done、待Codex续验|main-agent|0f9cb27|db61484|同上|续验+归档授权|Codex续验|
+|SF04 执行层遵守冻结recipe|dev-done、待Codex续验|main-agent|0f9cb27|db61484|同上|续验+批次授权|Codex续验|
+|SF06 批次原子冻结+中断恢复|dev-done、待Codex续验|main-agent|0f9cb27|db61484|同上|续验+批次授权|Codex续验|
+|SF05 预算等待退还attempt|dev-done、待Codex续验|main-agent|0f9cb27|db61484|同上|续验|Codex续验|
 |S1 执行范围（B领取/partial/C发送）|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|S1234-DEV-20261006.md|续验+模型授权|Codex续验|
 |S2 有效提取统一+引用保护|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|同上|续验+批次授权|Codex续验|
 |S3 批次冻结与恢复|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|同上|续验+批次授权|Codex续验|
