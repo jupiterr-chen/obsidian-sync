@@ -168,7 +168,8 @@ class N3SummaryEventTest(unittest.TestCase):
                 "SELECT evidence_claim_revisions_json FROM summaries"
                 " WHERE entity_type='company' AND entity_id='600519'"
             ).fetchone()[0])
-            statements = {e["statement"] for e in evidence}
+            statements = {e["statement"] for e in evidence
+                          if e.get("kind", "claim") == "claim"}
             self.assertIn("bull: margins expanding", statements)
             self.assertIn("bear: competition rising", statements)
             # the unrelated entity was never touched
@@ -185,6 +186,9 @@ class N3SummaryEventTest(unittest.TestCase):
 
         kb = _kb()
         try:
+            # R2: a provider cannot generate without evidence - give the
+            # entity one real document so recovery actually generates
+            _seed(kb, "RECOVER", "r", "extr-recover", symbol="EX")
             enqueue_summary_update(kb, "company", "EX", "document_added",
                                    {"source": "reports", "doc_id": "X"},
                                    event_key="doc:reports:X:v1")
