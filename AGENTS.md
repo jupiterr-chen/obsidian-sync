@@ -22,4 +22,4 @@
 
 ## 最新任务入口
 
-主仓库唯一为 obsidian-sync.git。基础迁移已完成，不重做M0或旧栈停机；旧目录及人工内容保留。最新入口为 docs/progress/ABCDE-ACCEPTANCE-20261005.md、docs/27-abcde-acceptance-taskbook.md 和 docs/28-abcde-next-agent-prompt.md。正文worker已运行，服务器与Windows阅读523链接正常；B/C仅部分实现，D历史时间过滤存在Q01，A–E整体尚未验收。F0已有实现与回归，预算重试Q05在模型启用前补修。按N1–N5限范围执行，不因P2缺陷要求整个项目返工。允许本地主仓库实现/测试/提交及唯一远端正常push；不使用OpenCode，不新增付费模型/资料外发，不自动全量回填。生产权限严格遵循本文开头的2026-10-05规则，历史迁移授权不再沿用。
+主仓库唯一为 obsidian-sync.git。基础迁移已完成，旧目录和人工内容保留，不重做M0/旧栈停机。最新入口 docs/progress/AC1-REVIEW-20261006.md、docs/29-ac1-followup-taskbook.md、docs/30-ac1-followup-prompt.md。Q01–Q05原六反例已独立通过，不重做；整批新代码尚未验收，剩余旧库升级、B/C内容链及长文覆盖，发布/恢复/D当前选版小修同批处理。现网仍67c6985r2，保持普通阅读，不因P2要求全项目返工。允许本地主仓库实现/隔离测试/提交及唯一远端正常push，不使用OpenCode，不新增付费模型/资料外发，不自动全量回填。生产权限遵循本文开头2026-10-05规则：Codex独立验收通过后仍须用户明确授权该次发布，旧迁移授权不沿用。
