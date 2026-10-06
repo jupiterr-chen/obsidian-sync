@@ -218,13 +218,22 @@ def _own_blocks_retriever(kb: KnowledgeStore, source: str, doc_id: str,
                           extraction_id: str, max_blocks: int = 40):
     """Single-document analysis reads the document's OWN extracted blocks
     (B2), not a corpus search; long documents are bounded by blocks.
-    Blocks are enriched with source/doc_id (build_analysis_prompt's
-    provenance line needs them) and returned keyword-search-shaped so
-    execute_analysis_run's hit unwrapping works unchanged."""
+    TQ2: binary-polluted blocks never enter a prompt - they stay in the
+    vault for diagnosis and TQ3 reprocessing. Blocks are enriched with
+    source/doc_id (build_analysis_prompt's provenance line needs them)
+    and returned keyword-search-shaped so execute_analysis_run's hit
+    unwrapping works unchanged."""
+    from .quality import block_evidence_usable
+
     def retriever(query, top_k):
         limit = min(max_blocks, int(top_k) if top_k else max_blocks)
         hits = []
-        for block in kb.get_blocks(extraction_id)[:limit]:
+        for block in kb.get_blocks(extraction_id):
+            usable, _why = block_evidence_usable(block.get("text", ""))
+            if not usable:
+                continue
+            if len(hits) >= limit:
+                break
             block = dict(block)
             block.setdefault("source", source)
             block.setdefault("doc_id", doc_id)
@@ -288,7 +297,33 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
     errors: List[Dict[str, Any]] = []
     for task in claim_pending_analysis_tasks(kb, limit=limit):
         query = _document_query(kb, task["source"], task["doc_id"])
-        blocks = kb.get_blocks(task["extraction_id"])
+        all_blocks = kb.get_blocks(task["extraction_id"])
+        # TQ2: binary-polluted blocks (byte-decoded glyph indexes) are
+        # not valid analysis evidence - excluded from the prompt. They
+        # remain visible in the vault for diagnosis and TQ3 reprocessing
+        from .quality import block_evidence_usable
+
+        blocks, excluded = [], 0
+        for block in all_blocks:
+            usable, _why = block_evidence_usable(block.get("text", ""))
+            if usable:
+                blocks.append(block)
+            else:
+                excluded += 1
+        if not blocks:
+            # every block is polluted: nothing analysable - honest
+            # failure, never an empty "done" analysis
+            with kb._tx() as conn:
+                conn.execute(
+                    "UPDATE analysis_tasks SET status=?, error=?,"
+                    " lease_until=NULL, updated_at=? WHERE task_key=?",
+                    (STATUS_FAILED, "no_usable_evidence_all_blocks_damaged",
+                     utc_now(), task["task_key"]))
+            failed += 1
+            errors.append({"task_key": task["task_key"],
+                           "error": "no_usable_evidence", "status":
+                           STATUS_FAILED})
+            continue
         sections = _sections(blocks, section_blocks)
         try:
             progress = json.loads(task["coverage_json"] or "{}") \
@@ -421,7 +456,8 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
         complete_now = all_covered and (len(section_outputs) <= 1
                                         or synthesis is not None)
         coverage = {
-            "total_blocks": len(blocks),
+            "total_blocks": len(all_blocks),
+            "excluded_damaged_blocks": excluded,
             "covered_blocks": covered,
             "sections_total": len(sections),
             "sections_done": len(section_outputs),

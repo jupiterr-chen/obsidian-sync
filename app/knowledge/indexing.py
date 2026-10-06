@@ -64,7 +64,10 @@ class SearchFilters:
     collections: Optional[List[str]] = None  # only "source_documents" exists today
 
 
-SELECTION_POLICY = "current-version-latest-extraction-v1"
+# TQ2 v2: binary-polluted blocks (byte-decoded glyph indexes) are
+# excluded from the DEFAULT search index - they remain reachable
+# through the evidence/blocks APIs and the reading vault.
+SELECTION_POLICY = "current-version-latest-extraction-v2"
 
 
 SELECTION_SQL = (
@@ -92,7 +95,10 @@ def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
             " JOIN extractions e ON e.extraction_id = b.extraction_id"
             " WHERE e.extraction_id IN (" + SELECTION_SQL + ")"
             " ORDER BY b.extraction_id, b.ordinal").fetchall()
-    return rows
+    from .quality import block_evidence_usable
+
+    return [row for row in rows
+            if block_evidence_usable(row["text"] or "")[0]]
 
 
 def allowed_block_ids(kb: KnowledgeStore,

@@ -250,7 +250,14 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                 " ORDER BY ordinal LIMIT ?",
                 ((extraction["extraction_id"] if extraction else ""),
                  max_blocks_per_doc)).fetchall()
+            from .quality import block_evidence_usable
+
             for block in blocks:
+                usable, _why = block_evidence_usable(block["text"])
+                if not usable:
+                    # TQ2: binary-polluted text stays in the vault for
+                    # diagnosis but is not valid summary evidence
+                    continue
                 locator = json.loads(block["locator_json"] or "{}")
                 evidence.append({
                     "kind": "document_block", "title": title,

@@ -73,8 +73,32 @@ def render_reading_note(title: str, source: str, doc_id: str,
             lines += ["## 第 %s 页" % current_page,
                       "[对照 PDF 本页](%s#page=%s)" % (original_url, current_page), ""]
             page = current_page
+        # TQ4: pages whose effective text is still damaged are marked
+        # 修复状态 in place - the user must never mistake a glyph dump
+        # for a verified page (display cleaning is NOT content repair)
+        damage = _block_damage(block)
+        if damage:
+            lines += ["> ⚠ 此页正文疑似二进制字形/控制字符污染（%s），"
+                      "尚未修复；请对照 PDF 本页，勿将本页文字当研究证据。"
+                      % "、".join(damage), ""]
         lines += [literal(block["text"]), "", "^" + block["block_id"], ""]
     return "\n".join(lines)
+
+
+def _block_damage(block: Dict[str, Any]) -> List[str]:
+    """Damage tags for one block: from its recorded quality issues or a
+    fresh scan of the text (older extractions predate issue recording)."""
+    quality = block.get("quality") or {}
+    issues = [i for i in (quality.get("issues")
+                          or block.get("quality_issues") or [])
+              if i in ("control_characters", "c1_or_del_characters",
+                       "cid_style_glyph_runs", "damaged_text_layer",
+                       "cid_font_unsupported")]
+    if not issues:
+        from .quality import damaged_reasons
+
+        issues = damaged_reasons(block.get("text", ""))
+    return issues
 
 
 def render_index(entries: List[str], absent: List[str],
@@ -191,19 +215,41 @@ class ReadingPublisher:
                 " ON d.source=v.source AND d.doc_id=v.doc_id"
                 " WHERE v.is_current=1 ORDER BY v.source, v.doc_id").fetchall()
             for version in versions:
-                extraction = self.kb._conn.execute(
+                # TQ3/TQ4: the ENTRY is the latest extraction that has
+                # USABLE text - a newer failed/empty re-extraction never
+                # silently drops the previous good entry (old evidence
+                # stays reachable); the newer attempt shows in the
+                # status page instead
+                extractions = self.kb._conn.execute(
                     "SELECT extraction_id, status FROM extractions"
                     " WHERE source=? AND doc_id=? AND version_id=?"
-                    " ORDER BY rowid DESC LIMIT 1",
+                    " ORDER BY rowid DESC",
                     (version["source"], version["doc_id"],
-                     version["version_id"])).fetchone()
+                     version["version_id"])).fetchall()
+                extraction = None
+                newest = extractions[0] if extractions else None
+                for candidate in extractions:
+                    usable = self.kb._conn.execute(
+                        "SELECT COUNT(*) FROM blocks WHERE extraction_id=?"
+                        " AND LENGTH(TRIM(text)) > 0",
+                        (candidate["extraction_id"],)).fetchone()[0]
+                    if usable:
+                        extraction = candidate
+                        break
                 title = unquote(version["title"] or version["doc_id"])
                 url = self._original_url(version["source"], version["doc_id"],
                                          version["version_id"])
                 if extraction is None:
                     without += 1
-                    absent.append("- %s — 未提取；[原文](%s)" % (literal(title), url))
+                    absent.append("- %s — %s；[原文](%s)" % (
+                        literal(title),
+                        newest["status"] if newest else "未提取", url))
                     continue
+                superseded_note = ""
+                if newest is not None and \
+                        newest["extraction_id"] != extraction["extraction_id"]:
+                    superseded_note = "（最新提取 %s 未通过，暂用上一版正文）" \
+                                      % newest["status"]
                 block_count = self.kb._conn.execute(
                     "SELECT COUNT(*) FROM blocks WHERE extraction_id=?"
                     " AND LENGTH(TRIM(text)) > 0",
@@ -213,6 +259,16 @@ class ReadingPublisher:
                     absent.append("- %s — %s；[原文](%s)" % (
                         literal(title), extraction["status"], url))
                     continue
+                # TQ4: entry state distinguishes 正文可用/需修复/待复核
+                damaged_blocks = self.kb._conn.execute(
+                    "SELECT COUNT(*) FROM blocks WHERE extraction_id=?"
+                    " AND (quality_issues_json LIKE '%control_characters%'"
+                    " OR quality_issues_json LIKE '%cid%'"
+                    " OR quality_issues_json LIKE '%damaged%')",
+                    (extraction["extraction_id"],)).fetchone()[0]
+                state = extraction["status"]
+                if damaged_blocks:
+                    state = "需修复（%d 页待处理）" % damaged_blocks
                 name = reading_filename(version["source"], version["doc_id"],
                                         extraction["extraction_id"])
                 if not os.path.isfile(os.path.join(self.output, name)):
@@ -224,8 +280,8 @@ class ReadingPublisher:
                             literal(title), url))
                     continue
                 published += 1
-                entries.append("- [%s](%s) — %s" % (
-                    literal(title), name, extraction["status"]))
+                entries.append("- [%s](%s) — %s%s" % (
+                    literal(title), name, state, superseded_note))
         content = render_index(entries, absent, published, without,
                                pending_publish)
         # index/status pages are fully derived: refreshable lets the entry

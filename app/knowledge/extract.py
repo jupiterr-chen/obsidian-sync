@@ -24,6 +24,7 @@ from .quality import (
     STATUS_READY,
     STATUS_REVIEW,
     analyze_text,
+    damage_signals,
     merge_statuses,
     route_page_to_ocr,
 )
@@ -681,6 +682,7 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                 status=STATUS_FAILED, issues=["no_page_objects_found"],
                 stats={"pages": None})
         cid_suspect_any = False
+        cid_pages: List[bool] = [False] * len(page_texts)
         engine_kind = "page-tree"
     else:
         issues.append("degraded_pdf_engine:pypdfium2-missing")
@@ -692,13 +694,16 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                 stats={"pages": None})
         cid_suspect_any = False
         page_texts = []
+        cid_pages = []
         for _num, data in ordered:
             if data is None:
                 page_texts.append(None)
+                cid_pages.append(False)
                 continue
             pieces, cid_suspect = _pdf_content_text(data)
             cid_suspect_any = cid_suspect_any or cid_suspect
             page_texts.append("\n".join(p for p in pieces if p.strip()))
+            cid_pages.append(cid_suspect)
         engine_kind = "stdlib-simplified"
 
     blocks: List[Block] = []
@@ -721,7 +726,20 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
             missing_content_pages += 1
             page_status = "missing_content"
             page_text = ""
-        wants_ocr, ocr_reasons = route_page_to_ocr(len(page_text), page_text)
+        wants_ocr, ocr_reasons = route_page_to_ocr(
+            len(page_text), page_text,
+            parser_id=parser_id, engine_kind=engine_kind)
+        if cid_pages[page_index - 1]:
+            ocr_reasons = ocr_reasons + ["cid_font_unsupported"]
+            wants_ocr = True
+        # TQ2: a DAMAGED text layer (control bytes, CID glyph runs,
+        # legacy engine byte-decoding) is never concatenated with OCR
+        # output - the OCR result REPLACES it as the effective page
+        # text and the damaged original is kept as diagnostic evidence
+        damage_reasons = {"control_characters", "c1_or_del_characters",
+                          "cid_style_glyph_runs", "replacement_chars",
+                          "cid_font_unsupported"}
+        damaged_layer = bool(damage_reasons & set(ocr_reasons))
         if wants_ocr:
             ocr_candidates += 1
             issues.append("page_%d_needs_ocr:%s"
@@ -761,7 +779,18 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                         # without a fallback attempt) is unmet, not text
                         page_status = "needs_ocr_unmet"
                     if ocr_text.strip():
-                        page_text = (page_text + "\n" + ocr_text).strip()
+                        if damaged_layer:
+                            # clean OCR wins; the damaged text layer is
+                            # preserved for diagnosis, NOT spliced back
+                            page_text = ocr_text
+                            issues.append(
+                                "page_%d_damaged_layer_replaced_by_ocr:%s"
+                                % (page_index, "+".join(
+                                    sorted(damage_reasons &
+                                           set(ocr_reasons)))))
+                        else:
+                            # healthy-but-sparse layer: OCR ADDS to it
+                            page_text = (page_text + "\n" + ocr_text).strip()
                         ocr_applied += 1
                         page_confidence = confidence
                         issues.append("page_%d_ocr_applied:%s:conf=%.2f"
@@ -791,6 +820,24 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
                            "needs_ocr_unmet", "missing_content",
                            "ocr_empty_after_fallback", "ocr_fallback_failed"):
             page_quality = Quality(STATUS_REVIEW, [page_status])
+        # TQ2: a page whose EFFECTIVE text is still damaged (no clean OCR
+        # landed) keeps its text readable for diagnosis but is marked
+        # damaged on the block so downstream evidence filters can see it
+        remaining_damage = damage_signals(page_text)
+        if remaining_damage and page_status != "ocr_applied":
+            page_status = "damaged_text_layer"
+            page_ocr_status[-1] = page_status
+            issues.append("page_%d_damaged_text_layer:%s" % (
+                page_index, "+".join(remaining_damage)))
+            page_quality = Quality(
+                STATUS_REVIEW, sorted(set(page_quality.issues)
+                                      | set(remaining_damage)
+                                      | {"damaged_text_layer"}))
+        elif remaining_damage:
+            # OCR landed but its own output still shows damage signals
+            page_quality = Quality(
+                STATUS_REVIEW, sorted(set(page_quality.issues)
+                                      | set(remaining_damage)))
         if page_text.strip():
             blocks.append(Block(
                 block_type="paragraph", text=page_text,
@@ -809,9 +856,11 @@ def extract_pdf(raw: bytes, ocr=None, ocr_config=None, renderer=None,
     page_problems = (unmet_ocr_pages > 0 or missing_content_pages > 0
                      or low_confidence_pages > 0
                      or any(s in ("needs_ocr_unmet", "ocr_empty_after_fallback",
-                                  "ocr_fallback_failed", "ocr_failed")
+                                  "ocr_fallback_failed", "ocr_failed",
+                                  "damaged_text_layer")
                             for s in page_ocr_status)
                      or any("ocr_failed" in i or "fallback_failed" in i
+                            or "damaged_text_layer" in i
                             for i in merged_issues))
     status = merge_statuses(quality.status,
                             STATUS_REVIEW if page_problems else STATUS_READY,
