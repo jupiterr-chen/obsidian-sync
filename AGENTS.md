@@ -22,4 +22,4 @@
 
 ## 最新任务入口
 
-主仓库唯一为 obsidian-sync.git。基础迁移已完成，旧目录和人工内容保留，不重做M0/旧栈停机。最新入口 docs/progress/AC1-REVIEW-20261006.md、docs/29-ac1-followup-taskbook.md、docs/30-ac1-followup-prompt.md。Q01–Q05原六反例已独立通过，不重做；整批新代码尚未验收，剩余旧库升级、B/C内容链及长文覆盖，发布/恢复/D当前选版小修同批处理。现网仍67c6985r2，保持普通阅读，不因P2要求全项目返工。允许本地主仓库实现/隔离测试/提交及唯一远端正常push，不使用OpenCode，不新增付费模型/资料外发，不自动全量回填。生产权限遵循本文开头2026-10-05规则：Codex独立验收通过后仍须用户明确授权该次发布，旧迁移授权不沿用。
+主仓库唯一为 obsidian-sync.git。最新入口 docs/progress/AC1-FOLLOWUP-20261006.md、docs/31-maintenance-and-model-activation.md、docs/32-model-activation-prompt.md。50cf6c1模型关闭的维护范围已获Codex限定验收（原6+7探针通过，382回归通过/2跳过），旧库升级阻断解除；尚未获用户对该次生产发布授权。B/C启用前仍有MA01结果发布、MA02合并引用、MA03单次预算及范围等集中修复，不能因它们阻挡模型关闭维护范围。默认开发任务走docs/31轨道B，不重做迁移/已通过修复，不停阅读。现网仍67c6985r2；保留旧目录/人工内容。允许本地主仓库实现/隔离测试/正常commit和唯一远端push；不用OpenCode，不真实模型调用/资料外发，不自动全量回填。生产遵循本文首部授权规则；50cf6c1的验收不得沿用到后续新增代码。
