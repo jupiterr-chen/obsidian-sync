@@ -22,7 +22,9 @@ from urllib.parse import unquote
 
 from .store import KnowledgeStore, utc_now
 from .writeback import register_write_root, write_candidate
-from .analysis_tasks import STATUS_BLOCKED, STATUS_DONE
+from .analysis_tasks import (STATUS_BLOCKED, STATUS_DONE, STATUS_FAILED,
+                             STATUS_PARTIAL, STATUS_PENDING,
+                             STATUS_RUNNING)
 
 ANALYSIS_DIR_NAME = "分析报告"
 ANALYSIS_INDEX_NAME = "分析索引.md"
@@ -152,7 +154,8 @@ class AnalysisPublisher:
             task = self.kb._conn.execute(
                 "SELECT * FROM analysis_tasks WHERE task_key=?",
                 (key,)).fetchone()
-            if task is None or task["status"] != "done":
+            if task is None or task["status"] not in (STATUS_DONE,
+                                                      STATUS_PARTIAL):
                 return False
             run = self.kb._conn.execute(
                 "SELECT * FROM analysis_runs WHERE run_id=?",
@@ -195,7 +198,19 @@ class AnalysisPublisher:
                                task["version_id"]))
         name = analysis_page_filename(task["source"], task["doc_id"],
                                       task["extraction_id"])
-        write_candidate(self.output, name, content, owner="analysis-publisher")
+        outcome = write_candidate(self.output, name, content,
+                                  owner="analysis-publisher")
+        # R4: remember the path ACTUALLY written. When an older analysis
+        # identity (e.g. pv1) already owns the main name, the shared
+        # writeback rules preserve it and deliver this revision as a
+        # candidate beside it - the index must link THAT file so every
+        # published revision stays reachable, old and new.
+        written = outcome.get("candidate_path") or outcome.get("path") \
+            or os.path.join(self.output, name)
+        with self.kb._tx() as conn:
+            conn.execute(
+                "UPDATE analysis_tasks SET publish_path=? WHERE"
+                " task_key=?", (os.path.basename(written), key))
         return True
 
     def rebuild_index(self) -> Dict[str, Any]:
@@ -215,27 +230,38 @@ class AnalysisPublisher:
                                 or task["doc_id"])
                 url = self._original_url(task["source"], task["doc_id"],
                                          task["version_id"])
-                if task["status"] == STATUS_DONE:
-                    name = analysis_page_filename(
-                        task["source"], task["doc_id"],
-                        task["extraction_id"])
-                    if os.path.isfile(os.path.join(self.output, name)):
+                # R4: link the path ACTUALLY published for THIS task
+                # identity (prompt/model revisions of the same document
+                # publish beside each other; the index reaches each one)
+                published_name = task["publish_path"] if "publish_path" in \
+                    task.keys() else None
+                if task["status"] in (STATUS_DONE, STATUS_PARTIAL) \
+                        and published_name \
+                        and os.path.isfile(os.path.join(self.output,
+                                                        published_name)):
+                    if task["status"] == STATUS_DONE:
                         done += 1
-                        entries.append("- [%s](%s) — %s" % (
-                            title, name, task["model_identity"]))
+                        entries.append("- [%s](%s) — %s（%s / %s）" % (
+                            title, published_name, task["model_identity"],
+                            task["prompt_version"], task["template_version"]))
                     else:
                         pending_pages += 1
                         entries.append(
-                            "- %s — 待发布；[原文](%s)" % (title, url))
+                            "- [%s](%s) — 部分分析（待续，预算恢复后自动"
+                            "继续）" % (title, published_name))
+                elif task["status"] in (STATUS_DONE, STATUS_PARTIAL):
+                    pending_pages += 1
+                    entries.append("- %s — 待发布；[原文](%s)" % (title, url))
                 elif task["status"] == STATUS_BLOCKED:
                     entries.append("- %s — 未分析（模型未启用）；[原文](%s)"
                                    % (title, url))
                 elif task["status"] == STATUS_FAILED:
                     entries.append("- %s — 分析失败（%s）；[原文](%s)" % (
                         title, (task["error"] or "")[:60], url))
+                elif task["status"] == STATUS_RUNNING:
+                    entries.append("- %s — 分析中；[原文](%s)" % (title, url))
                 else:
-                    entries.append("- %s — 待分析/分析中；[原文](%s)"
-                                   % (title, url))
+                    entries.append("- %s — 待分析；[原文](%s)" % (title, url))
         pending_note = ("；另有 %d 份待发布" % pending_pages
                         if pending_pages else "")
         lines = ["# 分析索引", "",

@@ -81,6 +81,37 @@ def read_state(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def resolve_analysis_runtime(config: KnowledgeConfig, kb=None):
+    """R3: assemble the B/C provider runtime from CONFIG with an
+    explicit OFF switch - the standard service entry (CLI worker /
+    KnowledgeWorker), not just a Python seam.
+
+    Returns (chat, ledger, settings). (None, None, settings) unless
+    extra.analysis.enabled is true AND a chat provider resolves AND it
+    is either the offline scripted provider (no network I/O - the
+    verification path) or a real provider with egress_allowed=true.
+    Default (no analysis key in config): DISABLED - production stays
+    off until explicitly configured."""
+    settings = dict((config.extra or {}).get("analysis") or {})
+    if not settings.get("enabled", False):
+        return None, None, settings
+    from .providers import OpenAICompatibleVision, load_providers
+
+    chat = (load_providers(config.extra or {}) or {}).get("chat")
+    if isinstance(chat, OpenAICompatibleVision):
+        chat = None  # R03: a vision model never impersonates chat
+    offline_script = bool(getattr(chat, "is_offline_script", False))
+    if chat is None or not (offline_script
+                            or getattr(chat, "egress_allowed", False)):
+        return None, None, settings
+    ledger = None
+    if kb is not None:
+        from .budget import BudgetLedger, load_budget
+
+        ledger = BudgetLedger(kb, load_budget(config.extra or {}))
+    return chat, ledger, settings
+
+
 def run_cycle(config: KnowledgeConfig, library_config: Config,
               max_impact_versions: int = 25, chat=None, ledger=None,
               analysis_prompt_version: str = "pv1",
@@ -303,10 +334,15 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
 
 
 class KnowledgeWorker:
-    """In-process hourly cycle with persisted heartbeat state."""
+    """In-process hourly cycle with persisted heartbeat state.
+
+    R3: chat/ledger/analysis settings come from the CONFIG through
+    resolve_analysis_runtime (explicit off switch) when not injected -
+    the standard service entry, not just a test seam."""
 
     def __init__(self, config: KnowledgeConfig, library_config: Config,
-                 interval_seconds: int = 3600):
+                 interval_seconds: int = 3600,
+                 chat=None, ledger=None, analysis_settings=None):
         self.config = config
         self.library_config = library_config
         self.interval = max(60, int(interval_seconds))
@@ -314,6 +350,22 @@ class KnowledgeWorker:
         self.thread: Optional[threading.Thread] = None
         self.heartbeat_thread: Optional[threading.Thread] = None
         self._started_at = utc_now()
+        self._runtime_kb = None  # keeps the ledger's store alive
+        if chat is None and analysis_settings is None:
+            kb = KnowledgeStore(config.knowledge_db)
+            try:
+                chat, ledger, analysis_settings = \
+                    resolve_analysis_runtime(config, kb=kb)
+            except Exception:
+                kb.close()
+                raise
+            if chat is not None:
+                self._runtime_kb = kb  # ledger binds this connection
+            else:
+                kb.close()
+        self.chat = chat
+        self.ledger = ledger
+        self.analysis_settings = analysis_settings or {}
 
     def _state_path(self) -> str:
         return worker_state_path(self.config.knowledge_db)
@@ -336,11 +388,19 @@ class KnowledgeWorker:
 
     def _loop(self) -> None:
         self._write(state="idle")
+        settings = self.analysis_settings or {}
         while not self.stop_event.is_set():
             attempt_started = utc_now()
             self._write(state="running", attempt_started_at=attempt_started)
             try:
-                cycle = run_cycle(self.config, self.library_config)
+                cycle = run_cycle(
+                    self.config, self.library_config,
+                    chat=self.chat,
+                    ledger=self.ledger,
+                    analysis_prompt_version=str(
+                        settings.get("prompt_version", "pv1")),
+                    analysis_limit=int(settings.get(
+                        "max_tasks_per_cycle", 5)))
                 self._write(state="idle", last_ok=bool(cycle.get("ok")),
                             last_error=cycle.get("error"),
                             last_cycle=cycle,
@@ -365,6 +425,9 @@ class KnowledgeWorker:
     def stop(self) -> None:
         self.stop_event.set()
         self._write(state="stopped", next_check_at=None)
+        if self._runtime_kb is not None:
+            self._runtime_kb.close()
+            self._runtime_kb = None
 
 
 def worker_is_stale(path: str, max_age_seconds: int = 120) -> Optional[bool]:

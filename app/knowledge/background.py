@@ -125,12 +125,25 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
         for doc in docs:
             versions = kb._conn.execute(
                 "SELECT version_id, first_observed_at, public_available_at,"
-                " synced_at FROM kb_versions WHERE source=? AND doc_id=?",
+                " synced_at, is_current FROM kb_versions"
+                " WHERE source=? AND doc_id=?",
                 (doc["source"], doc["doc_id"])).fetchall()
+            # R5/AC05: with NO cutoff this is the CURRENT view - the
+            # is_current=1 row decides, never a version_id ordering guess
+            # between versions that share an observation timestamp
+            if cutoff is None:
+                current = [v for v in versions if v["is_current"]]
+                chosen_version = current[0] if current else None
+            else:
+                chosen_version = None
             # version visible at the cutoff = latest visibility instant
             # among versions that qualify (NOT today's is_current row)
             chosen = None
             for version in versions:
+                if cutoff is None and chosen_version is not None \
+                        and version["version_id"] != \
+                        chosen_version["version_id"]:
+                    continue
                 instant = _visible_at(version["first_observed_at"],
                                       version["public_available_at"],
                                       cutoff, as_of_mode)
@@ -140,6 +153,14 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
                 rank = (instant, synced or instant, version["version_id"])
                 if chosen is None or rank > chosen:
                     chosen = rank
+            if chosen is None and chosen_version is not None:
+                # no-cutoff fallback for stores without observation
+                # stamps: the current row is still the current view
+                chosen = (_parse_ts(chosen_version["first_observed_at"])
+                          or datetime(1, 1, 1, tzinfo=timezone.utc),
+                          _parse_ts(chosen_version["synced_at"])
+                          or datetime(1, 1, 1, tzinfo=timezone.utc),
+                          chosen_version["version_id"])
             if chosen is None:
                 continue  # document not visible at the cutoff
             version_id = chosen[2]

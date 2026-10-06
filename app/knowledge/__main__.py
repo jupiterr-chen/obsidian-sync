@@ -115,12 +115,31 @@ def main(argv=None) -> int:
 
     if args.command == "worker":
         from library.config import Config
-        from .worker import KnowledgeWorker, run_cycle
+        from .store import KnowledgeStore
+        from .worker import (KnowledgeWorker, resolve_analysis_runtime,
+                             run_cycle)
 
         library_config = Config.load(config.library_config).resolve(
             os.path.dirname(os.path.abspath(config.library_config)))
         if args.once:
-            result = run_cycle(config, library_config)
+            # R3: the provider runtime comes from the config through the
+            # same explicit-off resolver the long-running worker uses
+            runtime_kb = KnowledgeStore(config.knowledge_db)
+            try:
+                chat, ledger, settings = resolve_analysis_runtime(
+                    config, kb=runtime_kb)
+            except Exception:
+                runtime_kb.close()
+                raise
+            try:
+                result = run_cycle(
+                    config, library_config, chat=chat, ledger=ledger,
+                    analysis_prompt_version=str(
+                        settings.get("prompt_version", "pv1")),
+                    analysis_limit=int(settings.get(
+                        "max_tasks_per_cycle", 5)))
+            finally:
+                runtime_kb.close()
             print(json.dumps(result, ensure_ascii=False, indent=2,
                              default=str))
             return 0 if result.get("ok") else 1

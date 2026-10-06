@@ -174,6 +174,13 @@ def make_config(tmp: str, reports: dict | None = None, discord: dict | None = No
         },
         "human_dirs": {"公司研究": "公司笔记", "主题研究": "主题笔记"},
     }
+    # persist the same config for entrypoints that load from a path
+    # (CLI worker --once); harmless for in-process users
+    import json as _json
+
+    with open(os.path.join(tmp, "library-config.json"), "w",
+              encoding="utf-8") as handle:
+        _json.dump(data, handle, ensure_ascii=False)
     return Config.from_dict(data), reports, discord
 
 

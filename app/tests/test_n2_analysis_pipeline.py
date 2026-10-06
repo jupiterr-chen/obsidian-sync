@@ -276,9 +276,14 @@ class N2ExecutorTest(unittest.TestCase):
             self.assertEqual(result["done"], 1)
             self.assertEqual(chat.calls, 1)
             counts = task_counts(kb)
-            self.assertEqual(counts.get("pending"), 1,
+            # budget-blocked task stays queued - R3 records it as an
+            # honest PARTIAL (resumable), never done/failed/paid
+            queued = counts.get("pending", 0) + counts.get("partial", 0)
+            self.assertEqual(queued, 1,
                              "budget-blocked task must stay queued: %r"
                              % counts)
+            self.assertEqual(counts.get("done"), 1)
+            self.assertEqual(counts.get("failed", 0), 0)
         finally:
             kb.close()
 

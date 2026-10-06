@@ -290,7 +290,14 @@ class MockEmbedder(EmbeddingProvider):
 
 
 class ScriptedChat(ChatProvider):
-    """Returns a scripted reply (optionally per-call list). PROTOCOL ONLY."""
+    """Returns a scripted reply (optionally per-call list). PROTOCOL ONLY.
+
+    Marked is_offline_script: no network I/O whatsoever, so the analysis
+    runtime may enable it from config WITHOUT the egress flag - that is
+    the offline service-entry verification path (R3). Real HTTP
+    providers always require egress_allowed."""
+
+    is_offline_script = True
 
     def __init__(self, replies: Sequence[str] = (), fail_with: Optional[Exception] = None):
         self.name = "mock"
@@ -352,6 +359,11 @@ def load_providers(config_dict: Dict[str, Any]) -> Dict[str, Any]:
         kind = str(spec.get("kind", "")).lower()
         if kind == "mock-embedder":
             providers[name] = MockEmbedder(dimensions=int(spec.get("dimensions", 64)))
+            continue
+        if kind == "scripted-chat":
+            # R3 offline service-entry provider: config-only, no network
+            providers[name] = ScriptedChat(
+                replies=spec.get("replies") or ())
             continue
         if _is_unfilled(spec):
             continue
