@@ -1,5 +1,7 @@
 # 正文乱码修复与全库质量梳理任务书
 
+> 最新（2026-10-06）：本批开发已完成独立复核，原16探针通过；仅续修[docs/34四组边界](34-tqma-followup-taskbook.md)，转交使用[docs/35提示词](35-tqma-followup-prompt.md)。详见[验收报告](progress/TQMA-REVIEW-20261006.md)。保留本文设计要求，不从头重做全部TQ/MA。
+
 2026-10-06。并入[docs/31统一任务](31-maintenance-and-model-activation.md)，与MA01–MA03同批开发；**先做正文质量防护与修复工具，再做LLM启用**，避免把污染正文送给模型。不是新的停机迁移任务。
 
 ## 已核对事实及尚未证明的内容

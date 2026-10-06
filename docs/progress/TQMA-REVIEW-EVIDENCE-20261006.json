@@ -1,0 +1,77 @@
+{
+  "source_commit": "fbc24bd64102f57fded3b7875e3ce9b94ede51a6",
+  "synthetic_offline_only": true,
+  "regression": {
+    "total": 412,
+    "passed": 410,
+    "skipped": 2
+  },
+  "existing_probes": {
+    "original": 6,
+    "AC1": 7,
+    "MA": 3
+  },
+  "probes": [
+    {
+      "probe": "TA01_empty_scope_must_block_C_too",
+      "passed": false,
+      "observed": {
+        "B_registered": 0,
+        "C_done_with_outside_evidence": 2
+      }
+    },
+    {
+      "probe": "TA02_old_queue_respects_active_scope_and_model",
+      "passed": false,
+      "observed": {
+        "scope_required": true,
+        "previous_provider_task_done": 1
+      }
+    },
+    {
+      "probe": "TA03_reject_worse_nonempty_extraction",
+      "passed": false,
+      "observed": {
+        "old_reading_link": false,
+        "bad_reading_link": true,
+        "indexed_extractions": []
+      }
+    },
+    {
+      "probe": "TA04_governance_keeps_actual_link_target",
+      "passed": false,
+      "observed": {
+        "linked_from_current_index": true,
+        "disposition": "archive-candidate",
+        "referenced_by_publish": true
+      }
+    },
+    {
+      "probe": "TA05_batch_membership_frozen_across_resume",
+      "passed": false,
+      "observed": {
+        "per_invocation_max": 1,
+        "same_batch_members": [
+          "A",
+          "B"
+        ]
+      }
+    },
+    {
+      "probe": "TA06_inventory_cli_never_initializes_or_migrates",
+      "passed": false,
+      "observed": {
+        "exit_code": 0,
+        "tables_before": 1,
+        "tables_after": 24
+      }
+    },
+    {
+      "probe": "TA07_sample_harness_shipped_in_git",
+      "passed": false,
+      "observed": {
+        "tracked": false
+      }
+    }
+  ]
+}

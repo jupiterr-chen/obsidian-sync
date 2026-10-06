@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+最新验收（2026-10-06）：fbc24bd原16反例通过，410回归通过/2跳过；四组执行边界按功能续修，见[报告](docs/progress/TQMA-REVIEW-20261006.md)、[任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。现网未变，未授权启用模型或历史重处理；不重做已通过修复。
+
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
 
 最新优先事项：已将PDF正文乱码问题并入[统一任务书](docs/31-maintenance-and-model-activation.md)，先做[正文质量TQ0–TQ4](docs/33-text-quality-repair-taskbook.md)，再启用LLM。全库质量扫描、原生文字重提取优先、仅必要页OCR；现有链接可打开不代表历史正文质量已通过。生产重处理和旧副本治理仍需具体授权。

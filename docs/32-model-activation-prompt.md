@@ -1,5 +1,7 @@
 # 下一位开发agent提示词：正文质量修复与模型启用前集中完善
 
+> 最新（2026-10-06）：本批开发已完成独立复核，原16探针通过；仅续修[docs/34四组边界](34-tqma-followup-taskbook.md)，转交使用[docs/35提示词](35-tqma-followup-prompt.md)。详见[验收报告](progress/TQMA-REVIEW-20261006.md)。保留本文设计要求，不从头重做全部TQ/MA。
+
 请在 `D:\2.Develop\8.Obsidian\obsidian-sync` 继续。先读AGENTS.md、docs/progress/AC1-FOLLOWUP-20261006.md、docs/31-maintenance-and-model-activation.md和docs/33-text-quality-repair-taskbook.md。用户已要求把正文乱码问题合并到本批，优先执行TQ0–TQ4，再集中完成MA任务。
 
 TQ范围：全库只读质量清单，区分文档/版本/提取/页面/文件；旧stdlib-pdf可能没有degraded标记，不可漏筛。修正CID/控制字符异常的逐页路由和质量门；坏文本层OCR成功后不能再拼回旧乱码，失败不得假ready。review污染内容不能作为B/C有效证据。提供有界原生重提取/按需OCR、新extraction、可恢复发布与历史证据保留。旧主稿/候选治理只做manifest+hash+引用核对及dry-run，不按文件名清理。不能粗暴删除¥、Ø、Ë等合法字符，也不能用删控制字符冒充恢复原文。
