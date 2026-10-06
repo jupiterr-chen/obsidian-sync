@@ -1,0 +1,77 @@
+{
+  "source_commit": "0f9cb27519d3cae1b513538667f1eb2d091964bf",
+  "synthetic_offline_only": true,
+  "regression": {
+    "total": 422,
+    "passed": 420,
+    "skipped": 2
+  },
+  "existing_probes": {
+    "TQMA": 7,
+    "MA": 3,
+    "AC1": 7,
+    "original": 6
+  },
+  "clean_archive_F1_S4_tests": {
+    "total": 4,
+    "passed": 4
+  },
+  "followup_probes": [
+    {
+      "probe": "SF01_S1_same_topic_evidence_stays_in_document_scope",
+      "passed": false,
+      "observed": {
+        "B_registered": 1,
+        "topic_summaries_done": 4,
+        "C_done_with_denied_evidence": 4
+      }
+    },
+    {
+      "probe": "SF02_S2_partial_damage_cannot_displace_complete_old",
+      "passed": false,
+      "observed": {
+        "effective": "mixed-new",
+        "indexed_blocks": 1,
+        "old_healthy_blocks": 2
+      }
+    },
+    {
+      "probe": "SF03_S2_human_wikilink_keeps_legacy_file",
+      "passed": false,
+      "observed": {
+        "disposition": "archive-candidate"
+      }
+    },
+    {
+      "probe": "SF04_S3_executor_honors_frozen_recipe",
+      "passed": false,
+      "observed": {
+        "job_done": 1,
+        "different_recipe_extraction": true
+      }
+    },
+    {
+      "probe": "SF06_S3_initial_registration_crash_resumes_original_batch",
+      "passed": false,
+      "observed": {
+        "refused": true,
+        "reason": "membership_divergence",
+        "frozen_members": [
+          "A"
+        ],
+        "registered_jobs": []
+      }
+    },
+    {
+      "probe": "SF05_F3_budget_recovery_does_not_exhaust_failure_retries",
+      "passed": false,
+      "observed": {
+        "calls_while_budget_zero": 0,
+        "calls_after_recovery": 0,
+        "task_status": "failed",
+        "attempts": 3,
+        "error": "max_attempts_exceeded"
+      }
+    }
+  ]
+}

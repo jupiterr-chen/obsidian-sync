@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+最新续验：0f9cb27的23探针与420回归通过（2跳过）；S4/F1通过，S1/S2/S3/F3仍须补齐原任务组合条件。见[续验报告](docs/progress/S1234-ACCEPTANCE-20261006.md)、[原任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。未部署，不扩展范围，F4仍后置。
+
 最新验收（2026-10-06）：fbc24bd原16反例通过，410回归通过/2跳过；四组执行边界按功能续修，见[报告](docs/progress/TQMA-REVIEW-20261006.md)、[任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。现网未变，未授权启用模型或历史重处理；不重做已通过修复。
 
 用于研报、财报和个人研究资料的长期知识服务。Obsidian 是研究工作台，服务端保留原文、正文、证据、版本和检索索引；研发及资金管理应用通过接口读取证据。
