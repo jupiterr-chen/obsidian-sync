@@ -1,5 +1,7 @@
 # 任务台账
 
+> **2026-10-06 第四批（最新）：S1–S4 与 F1–F3 完成并推送（[开发报告](S1234-DEV-20261006.md)，commit 25a89d6）。** 四份验收探针全绿（TQMA 7/7、MA 3/3、AC1 7/7、原 6/6），全回归 420 OK。F4（C1 展示小修）按任务书后置。生产清单/样本/批次/归档与部署全部等待各自授权；零生产变更。
+
 > **2026-10-06 最新独立验收：fbc24bd的原16反例通过，410回归通过/2跳过。新增边界归并S1模型范围、S2有效入口与引用、S3冻结批次、S4真正只读四组，按功能限制启用；不重做已通过修复/迁移，不停现网。** [验收报告](TQMA-REVIEW-20261006.md)、[集中任务书](../34-tqma-followup-taskbook.md)、[下一位agent提示词](../35-tqma-followup-prompt.md)。样本工具未入Git等列fix清单；本次无生产变更/真实模型调用/历史重处理。生产仍67c6985r2；任何发布均须先Codex验收再获用户对具体commit/范围授权。下方开发声明为历史记录。
 
 > **2026-10-06 第三批（最新）：TQ0–TQ4 与 MA01–MA03+C主题 完成并推送（[开发报告](TQMA-DEV-20261006.md)，commit db7b967）。** MA 探针 3/3、AC1 7/7、原 6/6 全绿；410 回归 OK。正文质量工具（清单/有界重提取/治理 dry-run）就绪待授权运行；B/C 启用门禁（全局证据编号/结果修订发布/单次上限+allowlist/主题接线）离线闭环，B4 真实质量待授权。**零生产变更，未部署。**
@@ -44,6 +46,14 @@
 |TQ1/TQ2 源头与下游质量门|todo：前置于LLM|next-agent|TQ0|—|同上|控制字符/CID路由及OCR拼接污染|隔离回归，不改生产|
 |TQ3 有界版本化重处理|todo：工具先做，生产批次待授权|next-agent|TQ1/TQ2|—|同上|新recipe/新extraction/旧证据保留|原生重提取优先，必要页OCR|
 |TQ4 Vault历史副本治理|todo：仅dry-run|next-agent|TQ0|—|同上|人工修改/引用/manifest/hash及精确授权|不自动清理，准备恢复映射|
+|S1 执行范围（B领取/partial/C发送）|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|S1234-DEV-20261006.md|续验+模型授权|Codex续验|
+|S2 有效提取统一+引用保护|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|同上|续验+批次授权|Codex续验|
+|S3 批次冻结与恢复|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|同上|续验+批次授权|Codex续验|
+|S4 真正只读预检|dev-done、待Codex续验|main-agent|fbc24bd|25a89d6|同上|续验|Codex续验|
+|F1 样本工具入Git+实测|dev-done（合成PDF端到端）|main-agent|fbc24bd|25a89d6|同上|真实样本窗口授权|按TQ-SAMPLE-PLAN|
+|F2 盘点补全|dev-done|main-agent|fbc24bd|25a89d6|同上|批次授权时使用|—|
+|F3 重试/退避接线|dev-done（付费无人值守前）|main-agent|fbc24bd|25a89d6|同上|真实provider授权后复核|—|
+|F4 C1展示小修|延期（仅展示层）|main-agent|—|—|任务书后置|依赖：展示细节，不影响防护|按需排期|
 |TQ1/TQ2 损伤路由+OCR选择+下游防护|dev-done、待Codex验收|main-agent|989e28d|721dde8|TQMA-DEV-20261006.md|验收+生产样本授权|Codex验收|
 |TQ0/TQ3/TQ4 清单/重提取/治理工具|dev-done（只读/dry-run/显式批）|main-agent|TQ1/2|2de919b|同上|批次授权|Codex验收|
 |样本方案+隔离测量 harness|方案+工具就绪|main-agent|TQ0|2d9f703|同上|生产样本授权|按TQ-SAMPLE-PLAN执行|
