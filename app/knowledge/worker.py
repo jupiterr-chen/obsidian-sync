@@ -95,6 +95,9 @@ def resolve_analysis_runtime(config: KnowledgeConfig, kb=None):
     settings = dict((config.extra or {}).get("analysis") or {})
     if not settings.get("enabled", False):
         return None, None, settings
+    # MA03: the SERVICE path always carries a scope - unconfigured
+    # means an EMPTY scope (registers nothing), never an implicit wave
+    settings["scope"] = settings.get("scope") or {}
     from .providers import OpenAICompatibleVision, load_providers
 
     chat = (load_providers(config.extra or {}) or {}).get("chat")
@@ -115,7 +118,8 @@ def resolve_analysis_runtime(config: KnowledgeConfig, kb=None):
 def run_cycle(config: KnowledgeConfig, library_config: Config,
               max_impact_versions: int = 25, chat=None, ledger=None,
               analysis_prompt_version: str = "pv1",
-              analysis_limit: int = 5) -> Dict[str, Any]:
+              analysis_limit: int = 5,
+              analysis_scope="__unset__") -> Dict[str, Any]:
     """One full knowledge cycle. Idempotent; safe to run back-to-back.
 
     chat/ledger are the B/C provider seam: production passes None (tasks
@@ -159,7 +163,7 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             # queues exactly once and C never stays stuck on the
             # pre-repair material after a batch lands
             from .summaries import entities_for_document, \
-                enqueue_summary_update
+                enqueue_summary_update, remember_document_entities
 
             extraction_events = 0
             topic_rules = ((config.extra or {}).get("summarization")
@@ -170,9 +174,12 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                     " FROM extractions WHERE created_at >= ?",
                     (cycle["started_at"],)).fetchall()
             for row in fresh:
-                for entity in entities_for_document(
-                        kb, row["source"], row["doc_id"],
-                        topic_rules=topic_rules):
+                entities = entities_for_document(
+                    kb, row["source"], row["doc_id"],
+                    topic_rules=topic_rules)
+                remember_document_entities(kb, row["source"],
+                                           row["doc_id"], entities)
+                for entity in entities:
                     if enqueue_summary_update(
                             kb, entity["entity_type"], entity["entity_id"],
                             "extraction_updated",
@@ -246,11 +253,21 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             # company queues a summary event - not only claims that
             # already have review proposals.
             from .summaries import (entities_for_document,
-                                    enqueue_summary_update)
+                                    enqueue_summary_update,
+                                    remember_document_entities)
+            topic_rules = ((config.extra or {}).get("summarization")
+                           or {}).get("topics")
             doc_events = 0
             for row in kb.pending_impacts(limit=max_impact_versions * 4):
-                for entity in entities_for_document(
-                        kb, row["source"], row["doc_id"]):
+                entities = entities_for_document(
+                    kb, row["source"], row["doc_id"],
+                    topic_rules=topic_rules)
+                # C-topic: the doc->entity mapping is PERSISTED at event
+                # time so topic evidence queries do not depend on config
+                # being re-derivable later
+                remember_document_entities(kb, row["source"],
+                                           row["doc_id"], entities)
+                for entity in entities:
                     if enqueue_summary_update(
                             kb, entity["entity_type"], entity["entity_id"],
                             "document_added",
@@ -277,15 +294,29 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                 model_identity = "%s/%s" % (
                     getattr(chat, "name", "chat"),
                     getattr(chat, "model", "unknown"))
+                # MA03: the SERVICE path always passes a scope; an
+                # unconfigured/empty scope registers NOTHING (never an
+                # implicit corpus wave toward a new model)
+                analysis_settings = ((config.extra or {})
+                                     .get("analysis") or {})
+                scope = analysis_settings.get("scope")
+                if analysis_scope != "__unset__":
+                    # explicit parameter (service entry) wins - the
+                    # resolver already defaulted an unconfigured scope
+                    # to {} = register nothing (MA03)
+                    scope = analysis_scope
                 cycle["analysis_tasks"] = register_ready_analysis_tasks(
                     kb, prompt_version=analysis_prompt_version,
                     model_identity=model_identity,
                     model_name=getattr(chat, "model", None),
-                    blocked_reason=None)
+                    blocked_reason=None,
+                    scope=scope)
                 cycle["analysis_executed"] = execute_analysis_tasks(
                     kb, chat, ledger=ledger,
                     prompt_version=analysis_prompt_version,
-                    limit=analysis_limit)
+                    limit=analysis_limit,
+                    max_attempts=int(analysis_settings.get(
+                        "max_attempts", 3)))
             else:
                 cycle["analysis_tasks"] = register_ready_analysis_tasks(kb)
                 cycle["analysis_executed"] = {"skipped": True,
@@ -430,7 +461,8 @@ class KnowledgeWorker:
                     analysis_prompt_version=str(
                         settings.get("prompt_version", "pv1")),
                     analysis_limit=int(settings.get(
-                        "max_tasks_per_cycle", 5)))
+                        "max_tasks_per_cycle", 5)),
+                    analysis_scope=settings.get("scope"))
                 self._write(state="idle", last_ok=bool(cycle.get("ok")),
                             last_error=cycle.get("error"),
                             last_cycle=cycle,

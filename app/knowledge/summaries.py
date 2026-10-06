@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS summary_publish_log (
     published_at TEXT NOT NULL,
     UNIQUE (entity_type, entity_id, revision)
 );
+CREATE TABLE IF NOT EXISTS entity_documents (
+    entity_type TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    first_mapped_at TEXT NOT NULL,
+    UNIQUE (entity_type, entity_id, source, doc_id)
+);
 """
 
 SUMMARY_DIR_NAME = "总结"
@@ -104,6 +112,27 @@ def ensure_schema(kb: KnowledgeStore) -> None:
                     conn.execute("ALTER TABLE %s ADD COLUMN %s %s"
                                  % (table, column, decl))
         conn.executescript(SCHEMA)
+
+
+def remember_document_entities(kb: KnowledgeStore, source: str,
+                               doc_id: str,
+                               entities: List[Dict[str, str]]) -> int:
+    """Persist the document->entity mapping at EVENT time (C-topic):
+    topic evidence queries later read this durable relation instead of
+    re-deriving keyword rules from config."""
+    ensure_schema(kb)
+    stored = 0
+    now = utc_now()
+    for entity in entities or []:
+        with kb._tx() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO entity_documents (entity_type,"
+                " entity_id, source, doc_id, first_mapped_at)"
+                " VALUES (?,?,?,?,?)",
+                (entity["entity_type"], entity["entity_id"], source,
+                 doc_id, now))
+            stored += cursor.rowcount
+    return stored
 
 
 def entities_for_document(kb: KnowledgeStore, source: str, doc_id: str,
@@ -234,9 +263,18 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                 " ORDER BY v.synced_at DESC LIMIT ?",
                 (entity_id, max_docs)).fetchall()
         else:
-            # topics are mapped at event time from configured keyword
-            # rules; there is no re-derivable topic->document join here
-            docs = []
+            # C-topic: docs joined through the PERSISTED event-time
+            # mapping (remember_document_entities), current versions only
+            docs = kb._conn.execute(
+                "SELECT d.source AS source, d.doc_id AS doc_id,"
+                " v.version_id AS version_id, d.title AS title FROM"
+                " entity_documents m JOIN kb_documents d"
+                " ON d.source=m.source AND d.doc_id=m.doc_id"
+                " JOIN kb_versions v ON v.source=d.source"
+                " AND v.doc_id=d.doc_id AND v.is_current=1"
+                " WHERE m.entity_type=? AND m.entity_id=?"
+                " ORDER BY v.synced_at DESC LIMIT ?",
+                (entity_type, entity_id, max_docs)).fetchall()
         evidence: List[Dict[str, Any]] = []
         for doc in docs:
             title = _unquote(doc["title"] or doc["doc_id"])
@@ -275,7 +313,7 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
         has_tasks = kb._conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND"
             " name='analysis_tasks'").fetchone()
-        if entity_type == "company" and has_tasks:
+        if has_tasks and entity_type == "company":
             analyses = kb._conn.execute(
                 "SELECT t.source, t.doc_id, t.version_id,"
                 " t.extraction_id, t.task_key, t.run_id,"
@@ -286,6 +324,17 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                 " AND UPPER(d.symbol)=UPPER(?)"
                 " ORDER BY t.finished_at DESC LIMIT ?",
                 (entity_id, max_analyses)).fetchall()
+        elif has_tasks:
+            analyses = kb._conn.execute(
+                "SELECT t.source, t.doc_id, t.version_id,"
+                " t.extraction_id, t.task_key, t.run_id,"
+                " t.model_identity, t.result_note FROM analysis_tasks t"
+                " JOIN entity_documents m ON m.source=t.source"
+                " AND m.doc_id=t.doc_id"
+                " WHERE t.status IN ('done','partial')"
+                " AND m.entity_type=? AND m.entity_id=?"
+                " ORDER BY t.finished_at DESC LIMIT ?",
+                (entity_type, entity_id, max_analyses)).fetchall()
         else:
             analyses = []
         for row in analyses:
@@ -513,6 +562,14 @@ def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
         from .budget import estimate_tokens
 
         est = estimate_tokens(prompt) + 8
+        # MA03: the summary send obeys the SAME single-call input cap as
+        # the analysis path - an oversized summary context is never sent
+        per_run = getattr(ledger.budget, "max_input_tokens_per_run", None)
+        if per_run and est > per_run:
+            errors.append({"entity_id": item["entity_id"],
+                           "error": "summary over per-run cap:"
+                                    " %d > %d tokens" % (est, per_run)})
+            continue  # stays pending; queued, not paid
         gated = hasattr(chat, "attempt_ledger")
         try:
             reservation = ledger.reserve(

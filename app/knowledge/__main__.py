@@ -160,7 +160,8 @@ def main(argv=None) -> int:
                     analysis_prompt_version=str(
                         settings.get("prompt_version", "pv1")),
                     analysis_limit=int(settings.get(
-                        "max_tasks_per_cycle", 5)))
+                        "max_tasks_per_cycle", 5)),
+                    analysis_scope=settings.get("scope"))
             finally:
                 runtime_kb.close()
             print(json.dumps(result, ensure_ascii=False, indent=2,

@@ -69,10 +69,12 @@ CREATE TABLE IF NOT EXISTS analysis_tasks (
 );
 CREATE TABLE IF NOT EXISTS analysis_outbox (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    task_key TEXT NOT NULL UNIQUE,
+    task_key TEXT NOT NULL,
+    result_hash TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     created_at TEXT NOT NULL,
-    consumed_at TEXT
+    consumed_at TEXT,
+    UNIQUE (task_key, result_hash)
 );
 """
 
@@ -86,6 +88,27 @@ _EXTRA_COLUMNS = (("model_name", "TEXT"),
 
 def ensure_schema(kb: KnowledgeStore) -> None:
     with kb._tx() as conn:
+        # MA01 forward migration: the outbox identity widens from
+        # task_key to (task_key, result_hash) so a partial->done revision
+        # publishes again. SQLite cannot alter a UNIQUE constraint: detect
+        # the old shape, copy every row (data preserved), swap atomically
+        # inside this transaction.
+        info = conn.execute("PRAGMA table_info(analysis_outbox)").fetchall()
+        if info and "result_hash" not in [r[1] for r in info]:
+            conn.execute(
+                "CREATE TABLE analysis_outbox_new (id INTEGER PRIMARY KEY"
+                " AUTOINCREMENT, task_key TEXT NOT NULL, result_hash TEXT"
+                " NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT"
+                " 'pending', created_at TEXT NOT NULL, consumed_at TEXT,"
+                " UNIQUE (task_key, result_hash))")
+            conn.execute(
+                "INSERT INTO analysis_outbox_new (id, task_key,"
+                " result_hash, status, created_at, consumed_at)"
+                " SELECT id, task_key, '', status, created_at, consumed_at"
+                " FROM analysis_outbox")
+            conn.execute("DROP TABLE analysis_outbox")
+            conn.execute("ALTER TABLE analysis_outbox_new RENAME TO"
+                         " analysis_outbox")
         conn.executescript(SCHEMA)
         # stores created by the first A-E delivery lack the executor
         # columns; add them idempotently (existing rows: attempts=0)
@@ -104,26 +127,70 @@ def task_key(source: str, doc_id: str, version_id: str, extraction_id: str,
     return "anl-" + hashlib.sha256(identity.encode()).hexdigest()[:32]
 
 
+def enqueue_result_publish(kb: KnowledgeStore, key: str,
+                           result_note: Optional[str]) -> bool:
+    """MA01: one publish event PER RESULT REVISION.
+
+    The event identity is (task_key, result_hash): a published partial
+    followed by a done (or further partial) revision enqueues a NEW
+    event, so the Obsidian page and index reach the CURRENT result
+    instead of staying on the first published draft. Replays of the
+    same content hash are no-ops; old pages are never overwritten."""
+    ensure_schema(kb)
+    digest = hashlib.sha256((result_note or "").encode(
+        "utf-8")).hexdigest()
+    with kb._tx() as conn:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO analysis_outbox (task_key, result_hash,"
+            " status, created_at) VALUES (?,?,'pending',?)",
+            (key, digest, utc_now()))
+        return cursor.rowcount > 0
+
+
 def register_ready_analysis_tasks(
         kb: KnowledgeStore, prompt_version: str = "pv1",
         model_identity: str = PLANNED_MODEL_IDENTITY,
         model_name: Optional[str] = None,
-        blocked_reason: Optional[str] = "model_disabled") -> Dict[str, int]:
+        blocked_reason: Optional[str] = "model_disabled",
+        scope: Optional[Dict[str, Any]] = None) -> Dict[str, int]:
     """Register analysis tasks for the LATEST extraction of CURRENT
     versions when that latest extraction is READY (review/failed on the
     latest row excludes the document - B4; an older ready extraction
     must never be analysed as if it were current). Duplicate detection
     uses the FULL identity, so a new prompt/model/template registers a
-    new task while an existing identity never re-registers."""
+    new task while an existing identity never re-registers.
+
+    MA03 allowlist: the SERVICE entry (worker/CLI via
+    resolve_analysis_runtime) always passes a scope -
+    {"symbols": [...], "doc_ids": [...]} - and an EMPTY scope registers
+    NOTHING (reported as scope_required): the authorized-sample rule is
+    enforced on the config path, never left to per-cycle limits, and
+    the corpus is never implicitly queued for a new model. scope=None
+    keeps the direct programmatic API (tests, probes, explicit batch
+    tooling) - the caller then owns the sample choice; the worker never
+    uses that mode. blocked registrations (no provider) are inert and
+    need no scope."""
     ensure_schema(kb)
+    if blocked_reason is None and scope is not None:
+        symbols = {(s or "").strip().upper()
+                   for s in (scope.get("symbols") or [])}
+        doc_ids = {(d or "").strip()
+                   for d in (scope.get("doc_ids") or [])}
+        if not symbols and not doc_ids:
+            return {"registered": 0, "scope_required": True,
+                    "note": "analysis.scope (symbols/doc_ids) must list"
+                            " the authorized sample; nothing registered"}
+    else:
+        symbols = doc_ids = None
     registered = 0
     with kb._tx() as conn:
         rows = conn.execute(
             "SELECT v.source, v.doc_id, v.version_id, e.extraction_id,"
-            " e.status FROM kb_versions v JOIN extractions e"
+            " e.status, d.symbol FROM kb_versions v JOIN extractions e"
             " ON e.rowid = (SELECT MAX(e2.rowid) FROM extractions e2"
             "  WHERE e2.source=v.source AND e2.doc_id=v.doc_id"
             "  AND e2.version_id=v.version_id)"
+            " JOIN kb_documents d ON d.source=v.source AND d.doc_id=v.doc_id"
             " WHERE v.is_current=1 AND e.status='ready'"
             " AND NOT EXISTS (SELECT 1 FROM analysis_tasks t"
             "  WHERE t.source=v.source AND t.doc_id=v.doc_id"
@@ -135,6 +202,10 @@ def register_ready_analysis_tasks(
         now = utc_now()
         status = STATUS_BLOCKED if blocked_reason else STATUS_PENDING
         for row in rows:
+            if symbols is not None:
+                symbol = (row["symbol"] or "").strip().upper()
+                if symbol not in symbols and row["doc_id"] not in doc_ids:
+                    continue  # outside the authorized sample
             key = task_key(row["source"], row["doc_id"], row["version_id"],
                            row["extraction_id"], model_identity,
                            prompt_version, ANALYSIS_TEMPLATE_VERSION)
@@ -167,18 +238,28 @@ def release_expired_analysis_tasks(kb: KnowledgeStore) -> int:
 
 
 def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
-                                 lease_seconds: int = 900
+                                 lease_seconds: int = 900,
+                                 max_attempts: int = 3
                                  ) -> List[Dict[str, Any]]:
     """Atomically claim up to `limit` pending tasks under a lease.
 
     R3: PARTIAL tasks are claimable too - resuming continues from the
-    last completed section without re-paying earlier ones."""
+    last completed section without re-paying earlier ones.
+
+    MA03: retries are BOUNDED - a pending task at/over max_attempts is
+    terminally failed here (attempts, lease and error state preserved),
+    and the lease grows linearly with attempts so retries back off
+    across cycles instead of hammering a failing provider."""
     ensure_schema(kb)
     from datetime import datetime, timedelta, timezone
 
+    with kb._tx() as conn:
+        conn.execute(
+            "UPDATE analysis_tasks SET status=?, error=?, lease_until=NULL,"
+            " finished_at=?, updated_at=? WHERE status=? AND attempts >= ?",
+            (STATUS_FAILED, "max_attempts_exceeded", utc_now(), utc_now(),
+             STATUS_PENDING, max(1, int(max_attempts))))
     now = datetime.now(timezone.utc)
-    lease_until = (now + timedelta(seconds=lease_seconds)).strftime(
-        "%Y-%m-%dT%H:%M:%SZ")
     claimed: List[Dict[str, Any]] = []
     with kb._tx() as conn:
         rows = conn.execute(
@@ -188,6 +269,10 @@ def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
             (STATUS_PENDING, STATUS_PARTIAL, utc_now(),
              max(1, int(limit)))).fetchall()
         for row in rows:
+            # linear backoff: attempt n waits n * base seconds
+            lease_until = (now + timedelta(
+                seconds=lease_seconds * max(1, (row["attempts"] or 0) + 1)
+            )).strftime("%Y-%m-%dT%H:%M:%SZ")
             cursor = conn.execute(
                 "UPDATE analysis_tasks SET status=?, lease_until=?,"
                 " attempts=attempts+1, updated_at=? WHERE task_key=?"
@@ -242,13 +327,30 @@ def _own_blocks_retriever(kb: KnowledgeStore, source: str, doc_id: str,
     return retriever
 
 
-def _budgeted_complete(kb, chat, ledger, prompt, run_id=None):
+class _PerRunCapExceeded(Exception):
+    """MA03: one call's input exceeds the per-run token cap. Raised
+    BEFORE any reservation or provider bytes leave."""
+
+
+def _budgeted_complete(kb, chat, ledger, prompt, run_id=None,
+                       budget=None):
     """One budgeted chat call. Returns (draft, usage); raises
     BudgetExceeded when the cap refuses the call BEFORE any bytes leave
-    and ProviderCallError-family exceptions on transport failure."""
+    and ProviderCallError-family exceptions on transport failure.
+
+    MA03: the SINGLE-CALL input cap (max_input_tokens_per_run) is
+    enforced here too - the old execute_analysis_run checked it, the
+    sectioned path must not bypass it. _PerRunCapExceeded signals the
+    caller to split the section or record a partial/blocked result
+    without sending."""
     from .budget import BudgetExceeded, estimate_tokens
 
     est = estimate_tokens(prompt) + 8
+    per_run = getattr(budget, "max_input_tokens_per_run", None) \
+        if budget is not None else None
+    if per_run and est > per_run:
+        raise _PerRunCapExceeded(
+            "per-run input cap: %d > %d tokens" % (est, per_run))
     gated = hasattr(chat, "attempt_ledger")
     reservation = ledger.reserve("chat", est, run_id=run_id,
                                  count_request=not gated)
@@ -261,6 +363,17 @@ def _budgeted_complete(kb, chat, ledger, prompt, run_id=None):
         raise
     ledger.settle(reservation, usage, run_id=run_id)
     return draft, usage
+
+
+def _split_section(section: List[Dict[str, Any]]
+                   ) -> List[List[Dict[str, Any]]]:
+    """Halve a section (MA03: token-capped sections split instead of
+    being skipped); a single oversized block is returned whole for the
+    caller to fail honestly."""
+    if len(section) <= 1:
+        return [section]
+    middle = len(section) // 2
+    return [section[:middle], section[middle:]]
 
 
 def _sections(blocks: List[Dict[str, Any]], section_blocks: int
@@ -325,6 +438,46 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                            STATUS_FAILED})
             continue
         sections = _sections(blocks, section_blocks)
+        # MA02: evidence numbers are GLOBAL across the document - block n
+        # keeps [n] in every section prompt, in the synthesis and in the
+        # final verification map, so [3] always means the same block
+        global_numbers = {block["block_id"]: index + 1
+                          for index, block in enumerate(blocks)}
+        # MA03: pre-split any section whose prompt exceeds the per-run
+        # input cap (stable section order -> stable resume progress)
+        per_run_cap = getattr(ledger.budget,
+                              "max_input_tokens_per_run", None)
+        if per_run_cap:
+            from .budget import estimate_tokens
+
+            def section_over_cap(section):
+                probe = _numbered_prompt(query, [
+                    (block, global_numbers[block["block_id"]])
+                    for block in section])
+                return estimate_tokens(probe) + 8 > per_run_cap
+
+            oversized_single = False
+            for index in range(len(sections)):
+                while section_over_cap(sections[index]):
+                    if len(sections[index]) <= 1:
+                        oversized_single = True
+                        break
+                    halves = _split_section(sections[index])
+                    sections[index:index + 1] = halves
+            if oversized_single:
+                with kb._tx() as conn:
+                    conn.execute(
+                        "UPDATE analysis_tasks SET status=?, error=?,"
+                        " lease_until=NULL, finished_at=?, updated_at=?"
+                        " WHERE task_key=?",
+                        (STATUS_FAILED,
+                         "block_exceeds_per_run_cap:%d" % per_run_cap,
+                         utc_now(), utc_now(), task["task_key"]))
+                failed += 1
+                errors.append({"task_key": task["task_key"],
+                               "error": "block exceeds per-run cap",
+                               "status": STATUS_FAILED})
+                continue
         try:
             progress = json.loads(task["coverage_json"] or "{}") \
                 if task.get("coverage_json") else {}
@@ -346,29 +499,41 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                 if index < len(section_outputs):
                     continue  # already paid and durably recorded
                 section = sections[index]
-                section = [dict(b, source=task["source"],
-                                doc_id=task["doc_id"]) for b in section]
-                prompt = build_analysis_prompt(query, section)
+                prompt = _numbered_prompt(query, [
+                    (block, global_numbers[block["block_id"]])
+                    for block in section])
                 try:
                     draft, _usage = _budgeted_complete(
-                        kb, chat, ledger, prompt, run_id=run_id)
+                        kb, chat, ledger, prompt, run_id=run_id,
+                        budget=ledger.budget)
                 except BudgetExceeded as exc:
                     budget_stop = True
                     errors.append({"task_key": task["task_key"],
                                    "error": str(exc)[:300],
                                    "status": "partial"})
                     break
-                verified = verify_citations(
-                    draft, sorted({int(m) for m in
-                                   __import__("re").findall(
-                                       r"\[(\d+)\]", draft)}),
-                    section)
+                # section-level verification against the GLOBAL numbers
+                cited = sorted({int(m) for m in __import__("re").findall(
+                    r"\[(\d+)\]", draft)})
+                section_ns = {global_numbers[b["block_id"]]
+                              for b in section}
+                valid_ns = [n for n in cited if n in section_ns]
+                invalid_ns = [n for n in cited if n not in section_ns]
+                citations = [{
+                    "n": n,
+                    "block_id": blocks[n - 1]["block_id"],
+                    "source": task["source"],
+                    "doc_id": task["doc_id"],
+                    "evidence_url": "/api/kb/v1/evidence/%s"
+                                    % blocks[n - 1]["block_id"],
+                } for n in valid_ns]
                 section_outputs.append({
                     "index": index,
                     "block_ids": [b["block_id"] for b in section],
                     "draft": draft,
-                    "valid_citations": verified["valid"],
-                    "all_valid": verified["all_valid"],
+                    "valid_citations": citations,
+                    "invalid_citations": invalid_ns,
+                    "all_valid": not invalid_ns,
                 })
                 # durable per-section progress: a crash here resumes
                 # from this section without re-paying earlier ones
@@ -387,11 +552,12 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
             if all_covered and len(section_outputs) > 1:
                 synth_prompt = [
                     "You are combining section analyses of ONE research",
-                    "document into its single-document analysis. Keep the",
-                    "cited evidence markers [n] from the sections; report",
-                    "the report's core views, checkable facts, assumptions,",
-                    "catalysts, risks and counter-evidence, missing",
-                    "evidence. Do not invent facts beyond the sections.",
+                    "document into its single-document analysis. The",
+                    "evidence markers [n] are GLOBAL document block",
+                    "numbers - keep them exactly; report the report's",
+                    "core views, checkable facts, assumptions, catalysts,",
+                    "risks and counter-evidence, missing evidence. Do",
+                    "not invent facts beyond the sections.",
                     "",
                     "Document: %s" % query, ""]
                 for output in section_outputs:
@@ -405,7 +571,15 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                 try:
                     synthesis, _usage = _budgeted_complete(
                         kb, chat, ledger, "\n".join(synth_prompt),
-                        run_id=run_id)
+                        run_id=run_id, budget=ledger.budget)
+                except _PerRunCapExceeded:
+                    # synthesis input over the cap: keep the verified
+                    # sections as an honest partial, never send oversized
+                    budget_stop = True
+                    synthesis_pending = True
+                    errors.append({"task_key": task["task_key"],
+                                   "error": "synthesis over per-run cap",
+                                   "status": "partial"})
                 except BudgetExceeded as exc:
                     budget_stop = True
                     synthesis_pending = True
@@ -455,6 +629,21 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
         # documents complete only when the synthesis also ran
         complete_now = all_covered and (len(section_outputs) <= 1
                                         or synthesis is not None)
+        # MA03: budget stopped before ANY section ran - stay queued, an
+        # empty partial has nothing to resume from
+        if budget_stop and not section_outputs and not complete_now:
+            with kb._tx() as conn:
+                conn.execute(
+                    "UPDATE analysis_tasks SET status=?, error=?,"
+                    " run_id=?, updated_at=?, lease_until=NULL"
+                    " WHERE task_key=?",
+                    (STATUS_PENDING, "budget_exhausted_before_first_section",
+                     run_id, utc_now(), task["task_key"]))
+            retried += 1
+            errors.append({"task_key": task["task_key"],
+                           "error": "budget exhausted (queued)",
+                           "status": "pending"})
+            continue
         coverage = {
             "total_blocks": len(all_blocks),
             "excluded_damaged_blocks": excluded,
@@ -467,13 +656,34 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
         if complete_now:
             draft_final = synthesis if len(section_outputs) > 1 \
                 else section_outputs[0]["draft"]
-            citations = [c for output in section_outputs
-                         for c in output["valid_citations"]]
+            # MA02: the FINAL text is re-verified against the GLOBAL
+            # number map - [999] is invalid no matter how valid every
+            # section was; citations resolve to real block ids
+            cited_final = sorted({int(m) for m in __import__(
+                "re").findall(r"\[(\d+)\]", draft_final)})
+            valid_final = [n for n in cited_final
+                           if 1 <= n <= len(blocks)]
+            invalid_final = [n for n in cited_final
+                             if not (1 <= n <= len(blocks))]
+            citations = [{
+                "n": n,
+                "block_id": blocks[n - 1]["block_id"],
+                "source": task["source"],
+                "doc_id": task["doc_id"],
+                "evidence_url": "/api/kb/v1/evidence/%s"
+                                % blocks[n - 1]["block_id"],
+            } for n in valid_final]
+            sections_all_valid = all(o.get("all_valid", True)
+                                     for o in section_outputs)
             verification = {
-                "all_valid": all(o["all_valid"] for o in section_outputs),
+                "all_valid": (not invalid_final) and sections_all_valid,
                 "valid": citations,
-                "invalid": [],
+                "invalid": invalid_final,
+                "section_invalid": [n for o in section_outputs
+                                    for n in o.get("invalid_citations",
+                                                   [])],
                 "coverage": coverage,
+                "verified_against": "global block numbering v1",
             }
             note = "**覆盖：全部 %d 块（%d 段，完整分析）**\n\n%s" % (
                 len(blocks), len(sections), draft_final)
@@ -490,11 +700,11 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                      json.dumps({"sections": section_outputs,
                                  "coverage": coverage},
                                 ensure_ascii=False), task["task_key"]))
-                conn.execute(
-                    "INSERT OR IGNORE INTO analysis_outbox (task_key,"
-                    " status, created_at) VALUES (?, 'pending', ?)",
-                    (task["task_key"], utc_now()))
             done += 1
+            # MA01: a NEW result revision publishes again, and the
+            # entity's summary updates from the fresh analysis evidence
+            enqueue_result_publish(kb, task["task_key"], note)
+            _notify_entities_of_result(kb, task, note)
         else:
             # honest partial: what exists is published as 待续 with its
             # coverage; the task stays claimable for continuation
@@ -519,13 +729,59 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                      json.dumps({"sections": section_outputs,
                                  "coverage": coverage},
                                 ensure_ascii=False), task["task_key"]))
-                conn.execute(
-                    "INSERT OR IGNORE INTO analysis_outbox (task_key,"
-                    " status, created_at) VALUES (?, 'pending', ?)",
-                    (task["task_key"], utc_now()))
             partial += 1
+            # MA01: partials publish too (marked 待续); a later revision
+            # (further sections or done) publishes again by result hash
+            enqueue_result_publish(kb, task["task_key"], note)
     return {"done": done, "partial": partial, "failed": failed,
             "retried": retried, "errors": errors}
+
+
+def _numbered_prompt(query: str, numbered_blocks) -> str:
+    """Section prompt with GLOBAL block numbers (MA02): block 17 is [17]
+    in its section, in the synthesis and in the final verification."""
+    lines = [
+        "You are a research assistant. Answer strictly using the numbered",
+        "evidence blocks below. Cite every factual statement as [n] - n is",
+        "the DOCUMENT-WIDE block number shown on each block. If the",
+        "evidence does not support a number, say unknown instead of",
+        "guessing.",
+        "",
+        "Question: %s" % query,
+        "",
+    ]
+    for block, number in numbered_blocks:
+        lines.append("[%d] (%s/%s page %s) %s" % (
+            number, block.get("source", ""), block.get("doc_id", ""),
+            (block.get("locator") or {}).get("page", "?"),
+            block.get("text", "")))
+    return "\n".join(lines)
+
+
+def _notify_entities_of_result(kb, task, note: str) -> int:
+    """MA01: B's completed revision feeds the entity summaries - a
+    second analysis round can never leave a company summary stuck on
+    round-one material. Event key includes the result hash, so each
+    revision queues exactly once."""
+    import hashlib as _hashlib
+
+    from .summaries import entities_for_document, enqueue_summary_update
+
+    result_hash = _hashlib.sha256(
+        (note or "").encode("utf-8")).hexdigest()
+    queued = 0
+    for entity in entities_for_document(kb, task["source"],
+                                        task["doc_id"]):
+        if enqueue_summary_update(
+                kb, entity["entity_type"], entity["entity_id"],
+                "analysis_completed",
+                {"source": task["source"], "doc_id": task["doc_id"],
+                 "version_id": task["version_id"],
+                 "task_key": task["task_key"]},
+                event_key="analysis:%s:%s" % (task["task_key"],
+                                              result_hash)):
+            queued += 1
+    return queued
 
 
 def task_counts(kb: KnowledgeStore) -> Dict[str, int]:

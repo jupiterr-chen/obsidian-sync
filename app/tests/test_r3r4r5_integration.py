@@ -252,7 +252,10 @@ class R3ServiceEntryTest(unittest.TestCase):
             config["providers"] = providers
         config["analysis"] = {"enabled": enabled,
                               "prompt_version": "pv1",
-                              "max_tasks_per_cycle": 5}
+                              "max_tasks_per_cycle": 5,
+                              # MA03: the authorized sample - the seeded
+                              # doc carries symbol EX
+                              "scope": {"symbols": ["EX"]}}
         path = os.path.join(tmp, "knowledge.json")
         with open(path, "w", encoding="utf-8") as handle:
             json.dump(config, handle, ensure_ascii=False)
@@ -483,7 +486,8 @@ class OldStoreTwoReportChainTest(unittest.TestCase):
                                        "风险有限。引用：[1]",
                                        "分析（scripted）：竞争加剧，"
                                        "毛利率承压。引用：[1]"]}},
-            "analysis": {"enabled": True, "prompt_version": "pv1"},
+            "analysis": {"enabled": True, "prompt_version": "pv1",
+                         "scope": {"symbols": ["600519"]}},
         }
         path = os.path.join(tmp, "knowledge.json")
         with open(path, "w", encoding="utf-8") as handle:

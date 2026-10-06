@@ -97,9 +97,11 @@ class R2EvidenceWiringTest(unittest.TestCase):
                                     "version_id": "v1"})
             summary_chat = _FakeChat()
             result = consume_updates(kb, chat=summary_chat)
-            self.assertEqual(result["generated"], 1, result)
+            # MA01: B's completion ALSO queued an entity event, so the
+            # manual event plus the auto event may both generate
+            self.assertGreaterEqual(result["generated"], 1, result)
 
-            prompt = summary_chat.prompts[0]
+            prompt = "\n".join(summary_chat.prompts)
             # the document's OWN text reached the model
             self.assertIn("margin rose to 25%", prompt)
             # the B analysis result reached the model, with identity
