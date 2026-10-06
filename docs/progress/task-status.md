@@ -1,5 +1,8 @@
 # 任务台账
 
+> **2026-10-06用户追加：正文质量TQ0–TQ4并入现有开发批次并前置于LLM。** [详细任务](../33-text-quality-repair-taskbook.md)、[统一任务](../31-maintenance-and-model-activation.md)、[更新后提示词](../32-model-activation-prompt.md)。只读核对发现当前523项提取中458项为旧stdlib-pdf；需全库质量清单、原生重提取优先、必要页OCR，不强制全库OCR。旧副本只做治理dry-run；生产重处理/归档/部署须另获具体授权。此前链接可打开的验收不代表正文内容正确，历史质量尚未修复。
+
+
 > **2026-10-06 AC1续验最新结论：50cf6c1模型关闭维护范围限定通过。** [报告](AC1-FOLLOWUP-20261006.md)：原探针6/6、AC1探针7/7、全回归382通过/2跳过；旧库升级阻断解除，可进入维护发布准备，仍须用户授权。B/C启用前集中修MA01–MA03，不阻挡维护范围、不重做迁移。见[双轨任务书](../31-maintenance-and-model-activation.md)与[提示词](../32-model-activation-prompt.md)。未部署、未调用真实模型。下方历史声明不代表最新状态。
 
 
@@ -33,6 +36,10 @@
 
 |任务|状态|负责人|依赖|commit|验收报告|阻塞|下一动作|
 |---|---|---|---|---|---|---|---|
+|TQ0 全库质量清单|todo：只读初查完成，完整映射未做|next-agent|docs/33|—|docs/33-text-quality-repair-taskbook.md|不可用文件数冒充文档数|引擎/页/提取/文件去重清单|
+|TQ1/TQ2 源头与下游质量门|todo：前置于LLM|next-agent|TQ0|—|同上|控制字符/CID路由及OCR拼接污染|隔离回归，不改生产|
+|TQ3 有界版本化重处理|todo：工具先做，生产批次待授权|next-agent|TQ1/TQ2|—|同上|新recipe/新extraction/旧证据保留|原生重提取优先，必要页OCR|
+|TQ4 Vault历史副本治理|todo：仅dry-run|next-agent|TQ0|—|同上|人工修改/引用/manifest/hash及精确授权|不自动清理，准备恢复映射|
 |R1 旧库前向升级 AC01|accepted：原反例及旧库周期通过|main-agent|d58119e|e58e91b|AC1-FOLLOWUP-20261006.md|生产发布待用户授权|维护范围可准备发布|
 |R2/R2b 证据接线+落盘恢复 AC02|原反例与公司离线链路accepted|main-agent|R1|bbbe98a|同上|主题/后续变更触发待完善；真实质量待授权|docs/31轨道B|
 |R3 分段覆盖+partial+服务接线 AC03|原反例accepted；真实模型启用未通过|main-agent|R2|8cca7de|同上|MA02引用/MA03单次预算及范围|模型启用前集中修|

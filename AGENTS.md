@@ -22,4 +22,6 @@
 
 ## 最新任务入口
 
+**2026-10-06用户新增优先任务：PDF正文乱码修复已并入docs/31与docs/32，详细TQ0–TQ4见docs/33-text-quality-repair-taskbook.md。默认先TQ质量盘点/源头和下游防护/有界重处理与Vault治理工具，再MA模型启用修复，同批独立验收。全量梳理=全库质量核对，非强制全库OCR；生产批次、索引切换、Vault归档/移除仍待具体授权。禁止按文件名清理或删Latin高位字符冒充修复；旧stdlib结果可能没有degraded标记。既有维护范围验收不代表历史正文质量通过，不沿用到TQ新代码。**
+
 主仓库唯一为 obsidian-sync.git。最新入口 docs/progress/AC1-FOLLOWUP-20261006.md、docs/31-maintenance-and-model-activation.md、docs/32-model-activation-prompt.md。50cf6c1模型关闭的维护范围已获Codex限定验收（原6+7探针通过，382回归通过/2跳过），旧库升级阻断解除；尚未获用户对该次生产发布授权。B/C启用前仍有MA01结果发布、MA02合并引用、MA03单次预算及范围等集中修复，不能因它们阻挡模型关闭维护范围。默认开发任务走docs/31轨道B，不重做迁移/已通过修复，不停阅读。现网仍67c6985r2；保留旧目录/人工内容。允许本地主仓库实现/隔离测试/正常commit和唯一远端push；不用OpenCode，不真实模型调用/资料外发，不自动全量回填。生产遵循本文首部授权规则；50cf6c1的验收不得沿用到后续新增代码。

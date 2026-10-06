@@ -1,6 +1,10 @@
-# 下一位开发agent提示词：模型启用前集中完善
+# 下一位开发agent提示词：正文质量修复与模型启用前集中完善
 
-请在 `D:\2.Develop\8.Obsidian\obsidian-sync` 继续。先读AGENTS.md、docs/progress/AC1-FOLLOWUP-20261006.md、docs/31-maintenance-and-model-activation.md。
+请在 `D:\2.Develop\8.Obsidian\obsidian-sync` 继续。先读AGENTS.md、docs/progress/AC1-FOLLOWUP-20261006.md、docs/31-maintenance-and-model-activation.md和docs/33-text-quality-repair-taskbook.md。用户已要求把正文乱码问题合并到本批，优先执行TQ0–TQ4，再集中完成MA任务。
+
+TQ范围：全库只读质量清单，区分文档/版本/提取/页面/文件；旧stdlib-pdf可能没有degraded标记，不可漏筛。修正CID/控制字符异常的逐页路由和质量门；坏文本层OCR成功后不能再拼回旧乱码，失败不得假ready。review污染内容不能作为B/C有效证据。提供有界原生重提取/按需OCR、新extraction、可恢复发布与历史证据保留。旧主稿/候选治理只做manifest+hash+引用核对及dry-run，不按文件名清理。不能粗暴删除¥、Ø、Ë等合法字符，也不能用删控制字符冒充恢复原文。
+
+“全量梳理”指全库质量核对，不是强制全库OCR。先准备约12–20份分层样本的隔离验证与资源测量方案，再申请具体生产数据批次；不要把另一agent的304/321统计当准确OCR任务数。生产已有523项最新提取中458项是旧stdlib-pdf，问题清单须结合引擎/文本/原文验证去重。本任务不授权实际历史批量重提取、Vault归档/移除、生产切换或真实模型调用。
 
 原6+7验收探针已通过，50cf6c1的“模型关闭维护范围”已获Codex限定验收。不要重做R1–R5或迁移，不因本批问题停止普通阅读。**这不授权部署；50cf6c1维护发布仍需用户明确授权，且其验收不得沿用到你新增的代码。**
 
