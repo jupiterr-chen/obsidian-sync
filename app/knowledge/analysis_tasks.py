@@ -695,10 +695,13 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
         # empty partial has nothing to resume from
         if budget_stop and not section_outputs and not complete_now:
             with kb._tx() as conn:
+                # F3/SF05: waiting for budget is NOT a provider failure -
+                # refund the claim's attempt so budget waits can never
+                # exhaust the failure-retry allowance
                 conn.execute(
                     "UPDATE analysis_tasks SET status=?, error=?,"
-                    " run_id=?, updated_at=?, lease_until=NULL"
-                    " WHERE task_key=?",
+                    " run_id=?, updated_at=?, lease_until=NULL,"
+                    " attempts=MAX(0, attempts-1) WHERE task_key=?",
                     (STATUS_PENDING, "budget_exhausted_before_first_section",
                      run_id, utc_now(), task["task_key"]))
             retried += 1

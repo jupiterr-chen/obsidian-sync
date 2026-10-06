@@ -378,6 +378,7 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             # analysis scope symbols plus the configured topic rules -
             # and NEVER from "no scope found" (empty = nothing sends)
             allowed_entities = None
+            allowed_documents = None
             if chat is not None:
                 summarization = (config.extra or {}).get(
                     "summarization") or {}
@@ -396,16 +397,44 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                         if topic_id:
                             allowed.add(("topic", topic_id))
                     allowed_entities = allowed
+                    doc_scope = effective_scope
                 else:
                     allowed_entities = {
                         ("company", (s or "").strip().upper())
                         for s in (c_scope.get("symbols") or [])} | {
                         ("topic", (t or "").strip())
                         for t in (c_scope.get("topics") or [])}
+                    doc_scope = c_scope
+                # S1/SF01: the authorized DOCUMENT set comes from the
+                # declared scope only (symbols + doc_ids) - topic
+                # classification adds ENTITIES to summarize, never
+                # documents to send
+                if doc_scope is not None:
+                    scope_symbols = {(s or "").strip().upper()
+                                     for s in (doc_scope.get("symbols")
+                                               or [])}
+                    scope_docs = {(d or "").strip()
+                                  for d in (doc_scope.get("doc_ids")
+                                            or [])}
+                    allowed_documents = set()
+                    if scope_symbols or scope_docs:
+                        with kb._lock:
+                            rows = kb._conn.execute(
+                                "SELECT source, doc_id, UPPER(symbol) sym"
+                                " FROM kb_documents").fetchall()
+                        for row in rows:
+                            if ((scope_symbols and row["sym"] in
+                                 scope_symbols)
+                                    or (scope_docs and row["doc_id"] in
+                                        scope_docs)):
+                                allowed_documents.add(
+                                    (row["source"], row["doc_id"]))
             cycle["summaries"] = consume_updates(kb, chat=chat,
                                                  ledger=ledger,
                                                  allowed_entities=
-                                                 allowed_entities)
+                                                 allowed_entities,
+                                                 allowed_documents=
+                                                 allowed_documents)
             if vault_dir and os.path.isdir(vault_dir):
                 cycle["summary_published"] = publish_pending_summaries(
                     kb, vault_dir,

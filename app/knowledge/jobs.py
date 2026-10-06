@@ -159,10 +159,36 @@ class JobRunner:
         done = failed = 0
         errors: list = []
         processed = 0
+        recipe_refused = 0
         while limit is None or processed < limit:
             job = self.kb.claim_next_job(STAGE_EXTRACT, self.config.job_lease_seconds)
             if job is None:
                 break
+            # S3/SF04: a job carries its FROZEN recipe identity - the
+            # digest it was registered under (frozen batches, repair
+            # lanes, historical registrations). A worker may only
+            # execute it under THAT recipe: a runtime recipe change
+            # REFUSES the job (back to pending, recoverable by an
+            # approved-recipe runner or a new batch) instead of silently
+            # extracting under different configuration.
+            if job["config_digest"] != self.extract_digest:
+                # refuse WITHOUT finishing: the job keeps its claim and
+                # lease, so this run stops touching it and a later
+                # recover_stale_jobs pass (after lease expiry) requeues
+                # it for an approved-recipe runner - recoverable, never
+                # silently re-extracted, never a hot loop
+                recipe_refused += 1
+                processed += 1
+                errors.append({
+                    "job": job["id"], "source": job["source"],
+                    "doc_id": job["doc_id"],
+                    "version_id": job["version_id"],
+                    "error": "recipe_mismatch: job frozen under %s,"
+                             " runtime recipe %s - run with the approved"
+                             " recipe or open a new batch"
+                             % (job["config_digest"], self.extract_digest),
+                })
+                continue
             processed += 1
             try:
                 self._execute_extract(job)
@@ -188,6 +214,7 @@ class JobRunner:
             "processed": processed,
             "done": done,
             "failed": failed,
+            "recipe_refused": recipe_refused,
             "errors": errors[:20],
             "job_counts": counts,
         }

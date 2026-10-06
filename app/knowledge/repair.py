@@ -169,18 +169,30 @@ def register_reprocess_batch(kb: KnowledgeStore, digest: str,
                 {"source": s, "doc_id": d, "version_id": v}
                 for s, d, v in missing]
 
-    registered_jobs = registered_audit = 0
-    now = utc_now()
-    for item in items:
+    # S3/SF06: the FREEZE is one atomic transaction covering the
+    # COMPLETE member list - a crash during the later per-member job
+    # registration leaves the full freeze intact, so a retry resumes
+    # the original batch instead of being rejected as divergent
+    registered_audit = 0
+    if not frozen_members:
+        now = utc_now()
         with kb._tx() as conn:
-            cursor = conn.execute(
-                "INSERT OR IGNORE INTO reprocess_batches (batch_id,"
-                " source, doc_id, version_id, recommended_action,"
-                " recipe_digest, registered_at) VALUES (?,?,?,?,?,?,?)",
-                (batch_id, item["source"], item["doc_id"],
-                 item["version_id"], item.get("recommended_action"),
-                 digest, now))
-            registered_audit += cursor.rowcount
+            conn.executescript(REPROCESS_SCHEMA)
+            for item in items:
+                cursor = conn.execute(
+                    "INSERT OR IGNORE INTO reprocess_batches (batch_id,"
+                    " source, doc_id, version_id, recommended_action,"
+                    " recipe_digest, registered_at) VALUES"
+                    " (?,?,?,?,?,?,?)",
+                    (batch_id, item["source"], item["doc_id"],
+                     item["version_id"], item.get("recommended_action"),
+                     digest, now))
+                registered_audit += cursor.rowcount
+        frozen_members = [(item["source"], item["doc_id"],
+                           item["version_id"]) for item in items]
+
+    registered_jobs = 0
+    for item in items:
         if kb.register_job(item["source"], item["doc_id"],
                            item["version_id"], "extract", digest):
             registered_jobs += 1

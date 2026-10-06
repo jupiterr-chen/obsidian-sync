@@ -512,24 +512,54 @@ class S2UnifiedSelectionTest(unittest.TestCase):
             publisher.consume()
             index = open(os.path.join(publisher.output, "开始阅读.md"),
                          encoding="utf-8").read()
-            # mixed extraction IS effective (has a usable block) and is
-            # newer -> the entry switches, old note remains reachable
-            self.assertIn(reading_filename("reports", "UNI", "new-mixed"),
+            # S2/SF02: the old extraction is FULLY healthy; the newer
+            # mixed one is partially damaged - the newer result must
+            # EARN the entry, so the old one keeps serving
+            self.assertIn(reading_filename("reports", "UNI", "old-good"),
                           index)
-            self.assertTrue(os.path.isfile(os.path.join(
-                publisher.output,
-                reading_filename("reports", "UNI", "old-good"))))
+            self.assertNotIn(reading_filename("reports", "UNI",
+                                              "new-mixed"), index)
+            self.assertIn("暂用上一版正文", index)
             # search agrees with reading on the effective extraction
             selected = [r["extraction_id"] for r in _selected_blocks(kb)]
-            self.assertEqual(selected, ["new-mixed"])
-            # governance: the entry file and the referenced old file
-            # both keep; nothing is an archive candidate
+            self.assertEqual(selected, ["old-good"])
+            # a COMPLETE healthy successor does switch the entry
+            kb.record_extraction({
+                "extraction_id": "new-complete", "source": "reports",
+                "doc_id": "UNI", "version_id": "v1",
+                "snapshot_sha256": "u", "parser_id": "t",
+                "parser_version": "1", "config_digest": "c3",
+                "status": "ready", "issues": [], "stats": {}},
+                [{"block_type": "paragraph",
+                  "text": "完整健康新稿第一页：营收 ¥1.4bn",
+                  "locator": {"kind": "pdf", "page": 1},
+                  "quality": {"status": "ready", "issues": []}},
+                 {"block_type": "paragraph",
+                  "text": "完整健康新稿第二页：净利率 12.1%",
+                  "locator": {"kind": "pdf", "page": 2},
+                  "quality": {"status": "ready", "issues": []}}])
+            publisher.enqueue("reports", "UNI", "v1", "new-complete")
+            publisher.consume()
+            index = open(os.path.join(publisher.output, "开始阅读.md"),
+                         encoding="utf-8").read()
+            self.assertIn(reading_filename("reports", "UNI",
+                                           "new-complete"), index)
+            self.assertEqual({r["extraction_id"]
+                              for r in _selected_blocks(kb)},
+                             {"new-complete"})
+            # old notes remain on disk (history, never deleted)
+            for extraction in ("old-good", "new-mixed"):
+                self.assertTrue(os.path.isfile(os.path.join(
+                    publisher.output, reading_filename(
+                        "reports", "UNI", extraction))))
+            # governance: every published file keeps (delivered
+            # revisions); nothing here is an archive candidate
             plan = plan_file_governance(kb, publisher.output)
             by_file = {f["file"]: f for f in plan["files"]}
-            self.assertEqual(by_file[reading_filename(
-                "reports", "UNI", "new-mixed")]["disposition"], "keep")
-            self.assertEqual(by_file[reading_filename(
-                "reports", "UNI", "old-good")]["disposition"], "keep")
+            for extraction in ("old-good", "new-mixed", "new-complete"):
+                self.assertEqual(by_file[reading_filename(
+                    "reports", "UNI", extraction)]["disposition"],
+                    "keep")
             self.assertNotIn("archive-candidate", plan["counts"])
         finally:
             kb.close()

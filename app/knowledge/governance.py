@@ -86,6 +86,10 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
     # current entry pages (开始阅读.md) is load-bearing for a reader
     # following the index, whatever its extraction status is
     linked_from_index = _files_linked_from_index(reading_dir)
+    # SF03: references from ANYWHERE in the vault outside the generated
+    # directory - human notes with [[解析正文/file#^fragment]] wikilinks
+    # or plain links to generated files make them human-load-bearing
+    referenced_from_vault = _files_referenced_from_vault(reading_dir)
     # derived entry pages themselves are load-bearing by definition -
     # they ARE the index readers open; never archive candidates
     derived_pages = {"开始阅读.md", "处理状态.md"}
@@ -102,6 +106,7 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
         entry["manifest_last_hash"] = recorded.get("last_hash")
         entry["referenced_by_publish"] = name in referenced
         entry["linked_from_current_index"] = name in linked_from_index
+        entry["referenced_from_vault"] = name in referenced_from_vault
         entry["is_current_entry"] = name in current_entry_files
 
         human_edit = (recorded.get("last_hash") is not None
@@ -112,6 +117,14 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
             entry["reason"] = ("content differs from the manifest's last"
                                " system write - a human edit is present;"
                                " keep and let a human resolve")
+        elif entry["referenced_from_vault"]:
+            # SF03: a human note anywhere in the vault wikilinks/embeds
+            # this file (path prefix, fragment anchor or plain link) -
+            # human-load-bearing regardless of machine provenance
+            entry["disposition"] = DISPOSITION_KEEP
+            entry["reason"] = ("referenced by a human note elsewhere in"
+                               " the vault (wikilink/fragment/markdown"
+                               " link); keep")
         elif (entry["is_current_entry"] or name in linked_from_index
               or name in derived_pages):
             entry["disposition"] = DISPOSITION_KEEP
@@ -180,6 +193,56 @@ def _files_linked_from_index(reading_dir: str) -> set:
         for target in re.findall(r"\]\(([^)]+\.md)\)", text):
             linked.add(os.path.basename(target))
     return linked
+
+
+_WIKILINK_RE = None
+
+
+def _files_referenced_from_vault(reading_dir: str) -> set:
+    """File names referenced from ANYWHERE in the vault outside the
+    generated reading directory (SF03): human notes in the personal
+    directories regularly embed `[[解析正文/text-legacy#^evidence]]`
+    wikilinks (with path prefixes and block-fragment anchors) or plain
+    markdown links to generated files. Such a file is human-load-
+    bearing regardless of machine provenance - the planner cannot prove
+    it unreferenced, so it must keep (and be flagged for manual
+    verification when ownership is unclear)."""
+    import re
+
+    global _WIKILINK_RE
+    if _WIKILINK_RE is None:
+        # [[target]] / [[target#fragment]] / [[target|alias]] /
+        # [[target#^block-id|alias]] - targets may carry a path prefix
+        _WIKILINK_RE = re.compile(
+            r"\[\[([^\]\|#]+)(?:#[^\]\|]*)?(?:\|[^\]]*)?\]\]")
+    vault_root = os.path.dirname(os.path.abspath(reading_dir))
+    referenced = set()
+    for root, dirs, files in os.walk(vault_root):
+        # stay out of the generated reading dir (covered separately)
+        # and hidden/state dirs
+        if os.path.abspath(root) == os.path.abspath(reading_dir):
+            dirs[:] = []
+            continue
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        for name in files:
+            if not name.endswith(".md"):
+                continue
+            try:
+                with open(os.path.join(root, name), "r",
+                          encoding="utf-8") as handle:
+                    text = handle.read()
+            except (OSError, ValueError):
+                continue
+            for target in _WIKILINK_RE.findall(text):
+                base = os.path.basename(target.strip().replace("\\", "/"))
+                # Obsidian wikilinks omit the .md extension - record
+                # both the bare target and its .md form
+                referenced.add(base)
+                if not base.endswith(".md"):
+                    referenced.add(base + ".md")
+            for target in re.findall(r"\]\(([^)]+\.md)\)", text):
+                referenced.add(os.path.basename(target))
+    return referenced
 
 
 def _current_entry_files(kb) -> set:

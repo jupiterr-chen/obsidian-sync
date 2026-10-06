@@ -242,6 +242,7 @@ def _entity_claim_evidence(kb: KnowledgeStore, entity_type: str,
 
 def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                               entity_id: str,
+                              allowed_documents: Optional[set] = None,
                               max_docs: int = 10,
                               max_blocks_per_doc: int = 6,
                               max_analyses: int = 10
@@ -277,6 +278,12 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                 (entity_type, entity_id, max_docs)).fetchall()
         evidence: List[Dict[str, Any]] = []
         for doc in docs:
+            # S1/SF01: the entity matched, but the DOCUMENT must also be
+            # inside the authorized material scope - a classification
+            # rule never widens what may leave the machine
+            if allowed_documents is not None and \
+                    (doc["source"], doc["doc_id"]) not in allowed_documents:
+                continue
             title = _unquote(doc["title"] or doc["doc_id"])
             extraction = kb._conn.execute(
                 "SELECT extraction_id FROM extractions WHERE source=? AND"
@@ -338,6 +345,11 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
         else:
             analyses = []
         for row in analyses:
+            if allowed_documents is not None and \
+                    (row["source"], row["doc_id"]) not in allowed_documents:
+                # S1/SF01: derived analyses of out-of-scope documents
+                # are just as much external material as their text
+                continue
             evidence.append({
                 "kind": "analysis", "source": row["source"],
                 "doc_id": row["doc_id"], "version_id": row["version_id"],
@@ -350,14 +362,24 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
 
 
 def _summary_evidence(kb: KnowledgeStore, entity_type: str,
-                      entity_id: str) -> List[Dict[str, Any]]:
+                      entity_id: str,
+                      allowed_documents: Optional[set] = None
+                      ) -> List[Dict[str, Any]]:
     """Combined evidence for one entity: human-reviewed claims PLUS the
     documents' own text blocks PLUS finished analyses (R2). Claim items
-    keep their historical keys (claim_id/revision/statement/...)."""
+    keep their historical keys (claim_id/revision/statement/...).
+
+    S1/SF01: ``allowed_documents`` (a set of authorized source/doc_id
+    pairs, or None for the direct programmatic API) bounds the EXTERNAL
+    material - classification rules decide WHICH ENTITY a summary is
+    for, never WHICH DOCUMENTS may leave the machine. Claims are the
+    system's own reviewed research memory and are not filtered by the
+    document allowlist."""
     claims = _entity_claim_evidence(kb, entity_type, entity_id)
     for claim in claims:
         claim.setdefault("kind", "claim")
-    return claims + _entity_document_evidence(kb, entity_type, entity_id)
+    return claims + _entity_document_evidence(
+        kb, entity_type, entity_id, allowed_documents=allowed_documents)
 
 
 def _evidence_has_content(evidence: List[Dict[str, Any]]) -> bool:
@@ -494,15 +516,19 @@ def _generated_for_event(kb: KnowledgeStore, event_key: Optional[str]
 def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
                     prompt_version: str = "pv1",
                     limit: int = 100,
-                    allowed_entities=None) -> Dict[str, Any]:
+                    allowed_entities=None,
+                    allowed_documents=None) -> Dict[str, Any]:
     """Drain the summary outbox.
 
     - S1 scope: with a provider active, ONLY entities in
       allowed_entities (a set of (entity_type, entity_id); None keeps
       the direct programmatic API) generate or assemble paid evidence -
       an out-of-scope event stays PENDING with a recorded reason until
-      the scope widens. Without a provider nothing sends, so the
-      no-provider blocked-revision path is unchanged.
+      the scope widens. allowed_documents (a set of (source, doc_id))
+      bounds the EXTERNAL material inside an authorized entity's
+      evidence: classification never widens what may leave the machine
+      (SF01). Without a provider nothing sends, so the no-provider
+      blocked-revision path is unchanged.
     - no real evidence (no document text, no analysis, no claim) -> the
       event is consumed into ONE blocked(insufficient_evidence)
       revision recording the event identity - never a paid generation
@@ -538,7 +564,8 @@ def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
             reused += 1
             continue
         evidence = _summary_evidence(
-            kb, item["entity_type"], item["entity_id"])
+            kb, item["entity_type"], item["entity_id"],
+            allowed_documents=allowed_documents)
         if not _evidence_has_content(evidence):
             record_summary(
                 kb, item["entity_type"], item["entity_id"],
