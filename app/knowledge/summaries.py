@@ -81,14 +81,29 @@ SUMMARY_INDEX_NAME = "总结索引.md"
 
 
 def ensure_schema(kb: KnowledgeStore) -> None:
+    """Idempotent forward migration (R1/AC01).
+
+    Stores created by the previous release lack event_key on
+    summary_outbox/summaries while SCHEMA creates a UNIQUE INDEX over
+    that column - running the script first crashed the upgrade (and the
+    worker's second half even with models off). Columns are detected and
+    patched BEFORE any index is created; interrupted migrations retry
+    cleanly because each ALTER only runs when its column is missing.
+    Existing queued events and revision history are never rebuilt."""
     with kb._tx() as conn:
+        for table, columns in (
+                ("summary_outbox", (("event_key", "TEXT"),)),
+                ("summaries", (("event_key", "TEXT"),)),
+        ):
+            existing = [r[1] for r in conn.execute(
+                "PRAGMA table_info(%s)" % table).fetchall()]
+            if not existing:
+                continue  # fresh store: SCHEMA below creates it in full
+            for column, decl in columns:
+                if column not in existing:
+                    conn.execute("ALTER TABLE %s ADD COLUMN %s %s"
+                                 % (table, column, decl))
         conn.executescript(SCHEMA)
-        for column, decl in (("event_key", "TEXT"),):
-            cols = [r[1] for r in conn.execute(
-                "PRAGMA table_info(summaries)").fetchall()]
-            if column not in cols:
-                conn.execute("ALTER TABLE summaries ADD COLUMN %s %s"
-                             % (column, decl))
 
 
 def entities_for_document(kb: KnowledgeStore, source: str,
