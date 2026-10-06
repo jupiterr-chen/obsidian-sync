@@ -1,5 +1,7 @@
 # 任务台账
 
+> **2026-10-06 第三批（最新）：TQ0–TQ4 与 MA01–MA03+C主题 完成并推送（[开发报告](TQMA-DEV-20261006.md)，commit db7b967）。** MA 探针 3/3、AC1 7/7、原 6/6 全绿；410 回归 OK。正文质量工具（清单/有界重提取/治理 dry-run）就绪待授权运行；B/C 启用门禁（全局证据编号/结果修订发布/单次上限+allowlist/主题接线）离线闭环，B4 真实质量待授权。**零生产变更，未部署。**
+
 > **2026-10-06用户追加：正文质量TQ0–TQ4并入现有开发批次并前置于LLM。** [详细任务](../33-text-quality-repair-taskbook.md)、[统一任务](../31-maintenance-and-model-activation.md)、[更新后提示词](../32-model-activation-prompt.md)。只读核对发现当前523项提取中458项为旧stdlib-pdf；需全库质量清单、原生重提取优先、必要页OCR，不强制全库OCR。旧副本只做治理dry-run；生产重处理/归档/部署须另获具体授权。此前链接可打开的验收不代表正文内容正确，历史质量尚未修复。
 
 
@@ -40,6 +42,10 @@
 |TQ1/TQ2 源头与下游质量门|todo：前置于LLM|next-agent|TQ0|—|同上|控制字符/CID路由及OCR拼接污染|隔离回归，不改生产|
 |TQ3 有界版本化重处理|todo：工具先做，生产批次待授权|next-agent|TQ1/TQ2|—|同上|新recipe/新extraction/旧证据保留|原生重提取优先，必要页OCR|
 |TQ4 Vault历史副本治理|todo：仅dry-run|next-agent|TQ0|—|同上|人工修改/引用/manifest/hash及精确授权|不自动清理，准备恢复映射|
+|TQ1/TQ2 损伤路由+OCR选择+下游防护|dev-done、待Codex验收|main-agent|989e28d|721dde8|TQMA-DEV-20261006.md|验收+生产样本授权|Codex验收|
+|TQ0/TQ3/TQ4 清单/重提取/治理工具|dev-done（只读/dry-run/显式批）|main-agent|TQ1/2|2de919b|同上|批次授权|Codex验收|
+|样本方案+隔离测量 harness|方案+工具就绪|main-agent|TQ0|2d9f703|同上|生产样本授权|按TQ-SAMPLE-PLAN执行|
+|MA01–MA03+C主题 启用门禁|dev-done（离线闭环）|main-agent|R批|db7b967|同上|B4真实模型授权|Codex验收|
 |R1 旧库前向升级 AC01|accepted：原反例及旧库周期通过|main-agent|d58119e|e58e91b|AC1-FOLLOWUP-20261006.md|生产发布待用户授权|维护范围可准备发布|
 |R2/R2b 证据接线+落盘恢复 AC02|原反例与公司离线链路accepted|main-agent|R1|bbbe98a|同上|主题/后续变更触发待完善；真实质量待授权|docs/31轨道B|
 |R3 分段覆盖+partial+服务接线 AC03|原反例accepted；真实模型启用未通过|main-agent|R2|8cca7de|同上|MA02引用/MA03单次预算及范围|模型启用前集中修|
