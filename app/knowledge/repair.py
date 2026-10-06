@@ -6,13 +6,36 @@ extraction failed - re-registering ONLY those for extraction. This is a
 repair lane, deliberately bounded so it can never degrade into an
 implicit full-corpus re-extraction; the historical wave remains a
 separately authorized pass (A1 ``historical`` flag).
+
+TQ3: an EXPLICIT reprocess batch lane for the text-quality inventory's
+candidates (legacy stdlib engines, damaged pages). Items are selected
+from the read-only inventory by recommended action and registered under
+the CURRENT recipe - a NEW extraction identity, so historical blocks,
+evidence URLs and old reading notes all stay intact. The batch is
+bounded, idempotent (three runs register once) and crash-resumable
+(jobs are the durable state); a worse new extraction never replaces
+the reading entry (the publisher switches only on usable text). No
+batch is ever derived implicitly from a recipe change alone.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from .store import KnowledgeStore, utc_now
+
+REPROCESS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS reprocess_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    doc_id TEXT NOT NULL,
+    version_id TEXT NOT NULL,
+    recommended_action TEXT,
+    registered_at TEXT NOT NULL,
+    UNIQUE (batch_id, source, doc_id, version_id)
+);
+"""
 
 
 def build_repair_queue(kb: KnowledgeStore, max_items: int = 25) -> List[Dict[str, Any]]:
@@ -53,3 +76,54 @@ def register_repair_jobs(kb: KnowledgeStore, digest: str,
             registered += 1
     return {"queue_size": len(queue), "registered": registered,
             "bounded_to": max_items}
+
+
+# ------------------------------------------------------------------ TQ3
+def select_reprocess_items(inventory: Dict[str, Any],
+                           actions: Optional[List[str]] = None,
+                           max_items: int = 20) -> List[Dict[str, Any]]:
+    """Deterministic, bounded selection from a TQ0 inventory.
+
+    Only documents whose recommended action is in `actions` (default:
+    the two candidate classes) and whose source is available are
+    eligible; ordering is stable (source, doc_id) so every run of the
+    same inventory yields the same batch."""
+    wanted = actions or ["native-reextract-candidate", "ocr-candidate"]
+    items = [doc for doc in inventory["documents"]
+             if doc.get("recommended_action") in wanted
+             and doc.get("source_available")
+             and doc.get("extraction_id")]
+    items.sort(key=lambda d: (d["source"], d["doc_id"]))
+    return items[:max(1, int(max_items))]
+
+
+def register_reprocess_batch(kb: KnowledgeStore, digest: str,
+                             items: List[Dict[str, Any]],
+                             batch_id: str) -> Dict[str, Any]:
+    """Register ONE explicit reprocess batch under the current recipe.
+
+    Idempotent per (batch, item) and per job identity - three
+    consecutive runs register each item exactly once. The audit table
+    records what was selected and when; the jobs table is the durable
+    execution state (lease/expiry semantics give crash resume for
+    free). Nothing is deleted or overwritten: the new extraction is a
+    NEW identity and old evidence stays reachable."""
+    with kb._tx() as conn:
+        conn.executescript(REPROCESS_SCHEMA)
+    registered_jobs = registered_audit = 0
+    now = utc_now()
+    for item in items:
+        with kb._tx() as conn:
+            cursor = conn.execute(
+                "INSERT OR IGNORE INTO reprocess_batches (batch_id,"
+                " source, doc_id, version_id, recommended_action,"
+                " registered_at) VALUES (?,?,?,?,?,?)",
+                (batch_id, item["source"], item["doc_id"],
+                 item["version_id"], item.get("recommended_action"), now))
+            registered_audit += cursor.rowcount
+        if kb.register_job(item["source"], item["doc_id"],
+                           item["version_id"], "extract", digest):
+            registered_jobs += 1
+    return {"batch_id": batch_id, "items": len(items),
+            "audit_rows_added": registered_audit,
+            "jobs_registered": registered_jobs}

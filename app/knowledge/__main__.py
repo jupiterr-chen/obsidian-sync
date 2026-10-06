@@ -21,7 +21,8 @@ def main(argv=None) -> int:
     for name in ("sync", "run-snapshots", "run-extracts", "rebuild-index",
                  "serve-kb", "worker", "status", "sample", "measure",
                  "evidence-links", "export-analysis", "repair-queue",
-                 "publish-reading", "ops-status"):
+                 "publish-reading", "ops-status", "quality-inventory",
+                 "reprocess", "governance-plan"):
         child = sub.add_parser(name)
         child.add_argument("--config", default=DEFAULT_CONFIG)
         if name in ("run-snapshots", "run-extracts"):
@@ -44,6 +45,28 @@ def main(argv=None) -> int:
                                help="vault root containing 解析正文/")
             child.add_argument("--limit", type=int, default=200,
                                help="consume at most N pending publishes")
+        if name == "governance-plan":
+            child.add_argument("--reading-dir", required=True,
+                               help="the vault 解析正文/ directory")
+            child.add_argument("--out", default=None)
+        if name == "reprocess":
+            child.add_argument("--batch-id", required=True,
+                               help="explicit audit id for this batch")
+            child.add_argument("--max", type=int, default=20,
+                               help="bounded batch size")
+            child.add_argument("--actions", default=None,
+                               help="comma-separated recommended actions"
+                                    " (default native-reextract,ocr)")
+            child.add_argument("--dry-run", action="store_true",
+                               help="list the selection without"
+                                    " registering anything")
+        if name == "quality-inventory":
+            child.add_argument("--out", default=None,
+                               help="write the full inventory JSON here")
+            child.add_argument("--reading-dir", default=None,
+                               help="hash vault reading files (解析正文/)")
+            child.add_argument("--include-history", action="store_true",
+                               help="count historical versions separately")
         if name == "ops-status":
             child.add_argument("--hours", type=int, default=24,
                                help="failure window (E)")
@@ -193,6 +216,81 @@ def main(argv=None) -> int:
             kb.close()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0 if result.get("published", 0) >= 0 else 1
+    if args.command == "governance-plan":
+        from knowledge.governance import plan_file_governance
+        from knowledge.store import KnowledgeStore
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            plan = plan_file_governance(kb, args.reading_dir)
+        finally:
+            kb.close()
+        payload = json.dumps(plan, ensure_ascii=False, indent=2)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.write(chr(10))
+        print(payload)
+        return 0
+    if args.command == "reprocess":
+        from knowledge.repair import (register_reprocess_batch,
+                                      select_reprocess_items)
+        from knowledge.text_quality import build_inventory
+        from knowledge.store import KnowledgeStore
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            inventory = build_inventory(kb)
+            actions = [a.strip() for a in args.actions.split(",")]                 if args.actions else None
+            items = select_reprocess_items(
+                inventory, actions=actions, max_items=args.max)
+            if args.dry_run:
+                result = {"batch_id": args.batch_id, "dry_run": True,
+                          "selected": [
+                              {"source": i["source"], "doc_id": i["doc_id"],
+                               "engine": i.get("engine"),
+                               "recommended_action":
+                                   i.get("recommended_action")}
+                              for i in items]}
+            else:
+                from knowledge.extract import extract_config_digest
+
+                digest = extract_config_digest(
+                    config.ocr_config(), config.extra or {})
+                result = register_reprocess_batch(
+                    kb, digest, items, args.batch_id)
+                result["note"] = ("jobs run with the normal worker"
+                                  " cycle; old extractions/evidence stay"
+                                  " intact")
+        finally:
+            kb.close()
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "quality-inventory":
+        from .text_quality import (build_inventory, inventory_summary)
+        from .store import KnowledgeStore
+
+        kb = KnowledgeStore(config.knowledge_db)
+        try:
+            reading_dir = args.reading_dir or (
+                (config.extra or {}).get("vault_dir")
+                and os.path.join((config.extra or {}).get("vault_dir"),
+                                 "解析正文"))
+            inventory = build_inventory(
+                kb, reading_dir=reading_dir,
+                include_history=bool(args.include_history))
+        finally:
+            kb.close()
+        payload = json.dumps(inventory, ensure_ascii=False, indent=2)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8",
+                      newline="\n") as handle:
+                handle.write(payload)
+                handle.write("\n")
+        print(inventory_summary(inventory))
+        print(json.dumps({"full_inventory": args.out or "not written"},
+                         ensure_ascii=False))
+        return 0
     if args.command == "ops-status":
         from .store import KnowledgeStore
         import sqlite3

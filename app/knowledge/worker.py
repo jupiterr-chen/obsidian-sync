@@ -153,6 +153,36 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                 kb, runner.extract_digest, max_items=10)
 
             cycle["extracts"] = runner.run_extract_jobs()
+            # TQ3: extractions recorded THIS cycle (new documents AND
+            # explicit reprocess batches) feed their entities' summary
+            # events - keyed per extraction so the same re-extraction
+            # queues exactly once and C never stays stuck on the
+            # pre-repair material after a batch lands
+            from .summaries import entities_for_document, \
+                enqueue_summary_update
+
+            extraction_events = 0
+            topic_rules = ((config.extra or {}).get("summarization")
+                           or {}).get("topics")
+            with kb._lock:
+                fresh = kb._conn.execute(
+                    "SELECT source, doc_id, version_id, extraction_id"
+                    " FROM extractions WHERE created_at >= ?",
+                    (cycle["started_at"],)).fetchall()
+            for row in fresh:
+                for entity in entities_for_document(
+                        kb, row["source"], row["doc_id"],
+                        topic_rules=topic_rules):
+                    if enqueue_summary_update(
+                            kb, entity["entity_type"], entity["entity_id"],
+                            "extraction_updated",
+                            {"source": row["source"], "doc_id": row["doc_id"],
+                             "version_id": row["version_id"],
+                             "extraction_id": row["extraction_id"]},
+                            event_key="extraction:%s"
+                                      % row["extraction_id"]):
+                        extraction_events += 1
+            cycle["entity_extraction_events"] = extraction_events
             cycle["index"] = build_generation(kb)
 
             # A3: extraction commits become durable pending publishes; the
