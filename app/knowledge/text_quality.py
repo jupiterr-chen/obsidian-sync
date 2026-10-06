@@ -39,6 +39,13 @@ _READABLE_PREFIX = "text-"
 _READABLE_SUFFIX = "-readable.md"
 
 
+def reading_filename_of(source: str, doc_id: str,
+                         extraction_id: str) -> str:
+    from .reading import reading_filename
+
+    return reading_filename(source, doc_id, extraction_id)
+
+
 def _stats_of(row) -> Dict[str, Any]:
     try:
         return json.loads(row["stats_json"] or "{}")
@@ -126,10 +133,17 @@ def recommend_document(parser_id: str, status: str, issues: List[str],
 
 
 def build_inventory(kb, reading_dir: Optional[str] = None,
-                    include_history: bool = False) -> Dict[str, Any]:
+                    include_history: bool = False,
+                    snapshot_root: Optional[str] = None) -> Dict[str, Any]:
     """The full read-only inventory. Document scope is deduplicated on
     (source, doc_id); historical versions/extractions are counted in
-    their own scopes and never mixed into current totals."""
+    their own scopes and never mixed into current totals.
+
+    snapshot_root (F2): when provided, source availability means the
+    snapshot FILE exists under the recorded store path and matches the
+    recorded size - metadata alone is reported unavailable with its
+    reason. Without it the check degrades honestly to
+    snapshot_root_not_checked (never silently treated as available)."""
     documents: List[Dict[str, Any]] = []
     scope_counts = {"documents": 0, "versions_current": 0,
                     "versions_historical": 0, "extractions": 0,
@@ -171,11 +185,52 @@ def build_inventory(kb, reading_dir: Optional[str] = None,
                 pages = classify_pages(kb, latest["extraction_id"])
                 scope_counts["pages"] += len(pages)
                 damaged_pages = sum(1 for p in pages if p["damage"])
+                pages_with_blocks = sum(1 for p in pages if p["chars"])
                 blob = kb._conn.execute(
-                    "SELECT store_path FROM snapshot_blobs WHERE sha256=?",
+                    "SELECT store_path, bytes FROM snapshot_blobs WHERE"
+                    " sha256=?",
                     (version["sha256"],)).fetchone() \
                     if version["sha256"] else None
-                source_available = blob is not None
+                # F2: metadata alone is NOT availability - with a
+                # snapshot_root the FILE must exist (and match its
+                # recorded size) to count. Without a root the status is
+                # honestly UNCHECKED (reported as such, still eligible
+                # for selection); a missing blob RECORD or a verified
+                # missing/mismatched file is unavailable either way.
+                blob_path = blob["store_path"] if blob else None
+                blob_file = None
+                if snapshot_root and blob_path:
+                    candidate = blob_path \
+                        if os.path.isabs(blob_path) \
+                        else os.path.join(snapshot_root, blob_path)
+                    if os.path.isfile(candidate):
+                        blob_file = candidate
+                file_checked = bool(snapshot_root)
+                size_mismatch = False
+                if blob_file and blob["bytes"]:
+                    try:
+                        size_mismatch = (os.path.getsize(blob_file)
+                                         != blob["bytes"])
+                    except OSError:
+                        blob_file = None
+                if not blob:
+                    source_available = False
+                    source_reason = "no_blob_record"
+                elif size_mismatch:
+                    source_available = False
+                    source_reason = "size_mismatch"
+                elif blob_file:
+                    source_available = True
+                    source_reason = "file_verified"
+                elif file_checked:
+                    source_available = False
+                    source_reason = "file_missing"
+                else:
+                    # metadata present, file not checked: selectable
+                    # but the report says so - an authorized batch must
+                    # supply snapshot_root for a verified answer
+                    source_available = True
+                    source_reason = "snapshot_root_not_checked"
                 issues = _issues_of(latest)
                 stats = _stats_of(latest)
                 action = recommend_document(
@@ -186,6 +241,7 @@ def build_inventory(kb, reading_dir: Optional[str] = None,
                 entry = {
                     "source": doc["source"], "doc_id": doc["doc_id"],
                     "version_id": version["version_id"],
+                    "version_sha256": version["sha256"],
                     "extraction_id": latest["extraction_id"],
                     "engine": "%s@%s" % (latest["parser_id"],
                                          latest["parser_version"]),
@@ -193,12 +249,16 @@ def build_inventory(kb, reading_dir: Optional[str] = None,
                     "status": latest["status"],
                     "issues": sorted(set(issues)),
                     "pages_total": len(pages),
+                    "pages_with_blocks": pages_with_blocks,
                     "pages_damaged": damaged_pages,
+                    "pages": pages,
                     "blocks_total": len(blocks),
                     "blocks_usable": usable,
                     "has_degraded_marker": any(
                         "degraded_pdf_engine" in i for i in issues),
                     "source_available": source_available,
+                    "source_check": {"file_checked": file_checked,
+                                     "reason": source_reason},
                     "recorded_ocr_stats": {
                         k: stats.get(k) for k in
                         ("ocr_candidate_pages", "ocr_applied_pages",
@@ -216,25 +276,53 @@ def build_inventory(kb, reading_dir: Optional[str] = None,
             documents.append(entry)
             scope_counts["documents"] += 1
 
+    # F2: map readable files to extractions by name identity; legacy
+    # main/candidate copies list with mapping unknown (never guessed)
+    readable_by_extraction: Dict[str, str] = {}
+    for doc_entry in documents:
+        if doc_entry.get("extraction_id"):
+            readable_by_extraction[doc_entry["extraction_id"]] = \
+                reading_filename_of(doc_entry["source"],
+                                    doc_entry["doc_id"],
+                                    doc_entry["extraction_id"])
     files: List[Dict[str, Any]] = []
+    legacy_files: List[Dict[str, Any]] = []
     if reading_dir and os.path.isdir(reading_dir):
         for name in sorted(os.listdir(reading_dir)):
             path = os.path.join(reading_dir, name)
             if not os.path.isfile(path) or name.startswith("."):
                 continue
-            if not (name.startswith(_READABLE_PREFIX)
-                    and name.endswith(_READABLE_SUFFIX)):
-                continue  # legacy machine/candidate files: TQ4 scope
             digest = hashlib.sha256(
                 open(path, "rb").read()).hexdigest()
-            files.append({"file": name, "sha256": digest,
-                          "bytes": os.path.getsize(path)})
-            scope_counts["files"] += 1
+            item = {"file": name, "sha256": digest,
+                    "bytes": os.path.getsize(path)}
+            if name in readable_by_extraction.values():
+                reverse = {v: k for k, v in
+                           readable_by_extraction.items()}
+                item["extraction_id"] = reverse[name]
+                files.append(item)
+                scope_counts["files"] += 1
+            else:
+                item["mapping"] = "candidate_or_legacy_unknown"
+                legacy_files.append(item)
+                scope_counts["files"] += 1
 
+    # the manifest hash covers documents AND every hashed file plus the
+    # per-document page digest, so any change that matters to a batch
+    # decision changes the hash
     manifest_source = "\n".join(
         "%s/%s:%s:%s" % (d["source"], d["doc_id"],
                          d.get("extraction_id"),
                          d.get("recommended_action"))
+        for d in documents)
+    manifest_source += "\n" + "\n".join(
+        "%s:%s" % (f["file"], f["sha256"])
+        for f in files + legacy_files)
+    manifest_source += "\n" + "\n".join(
+        "%s/%s:%s" % (d["source"], d["doc_id"],
+                      hashlib.sha256(json.dumps(
+                          d.get("pages") or [], ensure_ascii=False,
+                          sort_keys=True).encode("utf-8")).hexdigest())
         for d in documents)
     inventory = {
         "kind": "text-quality-inventory",
@@ -244,6 +332,7 @@ def build_inventory(kb, reading_dir: Optional[str] = None,
         "action_counts": action_counts,
         "documents": documents,
         "reading_files": files,
+        "legacy_or_candidate_files": legacy_files,
         "manifest_hash": hashlib.sha256(
             manifest_source.encode("utf-8")).hexdigest(),
         "note": "recommended actions are candidates for an authorized"

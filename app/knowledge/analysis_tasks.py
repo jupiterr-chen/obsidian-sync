@@ -239,7 +239,10 @@ def release_expired_analysis_tasks(kb: KnowledgeStore) -> int:
 
 def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
                                  lease_seconds: int = 900,
-                                 max_attempts: int = 3
+                                 max_attempts: int = 3,
+                                 model_identity: Optional[str] = None,
+                                 prompt_version: Optional[str] = None,
+                                 scope: Optional[Dict[str, Any]] = None
                                  ) -> List[Dict[str, Any]]:
     """Atomically claim up to `limit` pending tasks under a lease.
 
@@ -249,7 +252,16 @@ def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
     MA03: retries are BOUNDED - a pending task at/over max_attempts is
     terminally failed here (attempts, lease and error state preserved),
     and the lease grows linearly with attempts so retries back off
-    across cycles instead of hammering a failing provider."""
+    across cycles instead of hammering a failing provider.
+
+    S1: the claim obeys the ACTIVE execution context. With a
+    model_identity/prompt_version filter, only tasks registered under
+    THAT identity are claimable - an old queue from a previous
+    provider/prompt never executes under a new configuration. With a
+    scope ({"symbols", "doc_ids"}), only in-scope documents are
+    claimable; an EMPTY scope claims nothing. scope=None keeps the
+    direct programmatic API (tests/explicit batch tooling own their
+    sample); the worker never uses that mode."""
     ensure_schema(kb)
     from datetime import datetime, timedelta, timezone
 
@@ -259,15 +271,38 @@ def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
             " finished_at=?, updated_at=? WHERE status=? AND attempts >= ?",
             (STATUS_FAILED, "max_attempts_exceeded", utc_now(), utc_now(),
              STATUS_PENDING, max(1, int(max_attempts))))
+    symbols = doc_ids = None
+    if scope is not None:
+        symbols = {(s or "").strip().upper()
+                   for s in (scope.get("symbols") or [])}
+        doc_ids = {(d or "").strip()
+                   for d in (scope.get("doc_ids") or [])}
+        if not symbols and not doc_ids:
+            return []  # empty scope: nothing is authorized to execute
     now = datetime.now(timezone.utc)
     claimed: List[Dict[str, Any]] = []
     with kb._tx() as conn:
-        rows = conn.execute(
-            "SELECT * FROM analysis_tasks WHERE status IN (?,?)"
-            " AND (lease_until IS NULL OR lease_until < ?)"
-            " ORDER BY created_at LIMIT ?",
-            (STATUS_PENDING, STATUS_PARTIAL, utc_now(),
-             max(1, int(limit)))).fetchall()
+        sql = ("SELECT t.* FROM analysis_tasks t"
+               " JOIN kb_documents d ON d.source=t.source"
+               " AND d.doc_id=t.doc_id"
+               " WHERE t.status IN (?,?)"
+               " AND (t.lease_until IS NULL OR t.lease_until < ?)")
+        params: List[Any] = [STATUS_PENDING, STATUS_PARTIAL, utc_now()]
+        if model_identity is not None:
+            sql += " AND t.model_identity=?"
+            params.append(model_identity)
+        if prompt_version is not None:
+            sql += " AND t.prompt_version=?"
+            params.append(prompt_version)
+        if symbols is not None:
+            sql += (" AND (UPPER(d.symbol) IN (%s) OR t.doc_id IN (%s))"
+                    % (",".join("?" for _ in symbols) or "''",
+                       ",".join("?" for _ in doc_ids) or "''"))
+            params.extend(sorted(symbols))
+            params.extend(sorted(doc_ids))
+        sql += " ORDER BY t.created_at LIMIT ?"
+        params.append(max(1, int(limit)))
+        rows = conn.execute(sql, params).fetchall()
         for row in rows:
             # linear backoff: attempt n waits n * base seconds
             lease_until = (now + timedelta(
@@ -388,7 +423,10 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                            ledger=None, prompt_version: str = "pv1",
                            limit: int = 5,
                            max_attempts: int = 3,
-                           section_blocks: int = 8) -> Dict[str, Any]:
+                           section_blocks: int = 8,
+                           model_identity: Optional[str] = None,
+                           scope: Optional[Dict[str, Any]] = None
+                           ) -> Dict[str, Any]:
     """Claim and run pending analysis tasks.
 
     R3: long documents are analysed SECTION BY SECTION (consecutive
@@ -399,7 +437,12 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
     and the task row) that stays claimable for continuation; only full
     coverage (plus the synthesis over sections when there is more than
     one) marks the task done. Provider/budget refusals never send past
-    the cap; non-retryable failures fail honestly."""
+    the cap; non-retryable failures fail honestly.
+
+    S1: with model_identity/scope supplied, ONLY tasks of that identity
+    and that authorized sample are claimed (including PARTIAL resumes)
+    - an old queue from a previous provider/prompt never executes under
+    a new configuration, and an empty scope executes nothing."""
     from .analysis import build_analysis_prompt, verify_citations
     from .budget import Budget, BudgetLedger, BudgetExceeded
 
@@ -408,7 +451,10 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
     ledger = ledger or BudgetLedger(kb, Budget())
     done = partial = failed = retried = 0
     errors: List[Dict[str, Any]] = []
-    for task in claim_pending_analysis_tasks(kb, limit=limit):
+    for task in claim_pending_analysis_tasks(
+            kb, limit=limit, max_attempts=max_attempts,
+            model_identity=model_identity,
+            prompt_version=prompt_version, scope=scope):
         query = _document_query(kb, task["source"], task["doc_id"])
         all_blocks = kb.get_blocks(task["extraction_id"])
         # TQ2: binary-polluted blocks (byte-decoded glyph indexes) are
@@ -590,15 +636,31 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
         except __import__("knowledge.providers", fromlist=[
                 "ProviderCallError"]).ProviderCallError as exc:
             new_status = STATUS_PENDING if exc.retryable else STATUS_FAILED
+            # F3: a provider FAILURE backs off for real - the task
+            # cannot be re-claimed until its attempt-scaled
+            # next-attempt time passes (lease_until), distinguishing it
+            # from budget waits which retry on the next cycle
+            lease_value = "NULL"
+            if new_status == STATUS_PENDING:
+                from datetime import datetime, timedelta, timezone
+
+                backoff = timedelta(
+                    seconds=900 * max(1, task.get("attempts") or 1))
+                lease_value = (datetime.now(timezone.utc)
+                               + backoff).strftime("%Y-%m-%dT%H:%M:%SZ")
             with kb._tx() as conn:
                 conn.execute(
                     "UPDATE analysis_tasks SET status=?, error=?,"
                     " run_id=?, coverage_json=?, updated_at=?,"
-                    " lease_until=NULL WHERE task_key=?",
-                    (new_status, str(exc)[:500], run_id,
+                    " lease_until=? WHERE task_key=?",
+                    (new_status,
+                     ("retry_backoff: %s" % str(exc)[:480])
+                     if new_status == STATUS_PENDING
+                     else str(exc)[:500],
+                     run_id,
                      json.dumps({"sections": section_outputs},
                                 ensure_ascii=False),
-                     utc_now(), task["task_key"]))
+                     utc_now(), lease_value, task["task_key"]))
             if new_status == STATUS_PENDING:
                 retried += 1
             else:

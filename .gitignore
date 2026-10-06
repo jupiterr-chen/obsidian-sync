@@ -26,6 +26,8 @@ vault/
 tools/*
 # publishable acceptance/deployment tooling (no runtime data)
 !tools/shadow-acceptance
+# publishable text-quality sample/measurement tooling (F1)
+!tools/text-quality
 *.db
 *.db-wal
 *.db-shm

@@ -38,6 +38,12 @@ def _seed(kb, doc_id, sha, extraction_id, parser_id="pypdfium2",
         "ext": "pdf", "rel_path": "x", "is_current": True,
         "state": "ready", "content_changed_at": None}], stamp)
     kb.record_blob(sha, 10, "aa/%s" % sha, stamp)
+    import tempfile as _tf
+
+    _root = os.path.join(os.path.dirname(kb.path), "snaps")
+    os.makedirs(os.path.join(_root, "aa"), exist_ok=True)
+    with open(os.path.join(_root, "aa", sha), "wb") as handle:
+        handle.write(b"0123456789")
     kb.record_extraction({
         "extraction_id": extraction_id, "source": "reports",
         "doc_id": doc_id, "version_id": "v1",
@@ -73,7 +79,8 @@ class TQ3ReprocessTest(unittest.TestCase):
             _seed(kb, "LEGACY", "l", "extr-legacy", parser_id="stdlib-pdf",
                   blocks=_legacy_blocks())
             _seed(kb, "GOOD", "g", "extr-good")
-            inventory = build_inventory(kb)
+            snap_root = os.path.join(os.path.dirname(kb.path), "snaps")
+            inventory = build_inventory(kb, snapshot_root=snap_root)
             items = select_reprocess_items(inventory, max_items=10)
             ids = [i["doc_id"] for i in items]
             self.assertEqual(ids, ["LEGACY"], "only candidates selected")
@@ -88,7 +95,8 @@ class TQ3ReprocessTest(unittest.TestCase):
             self.assertEqual(third["jobs_registered"], 0)
             self.assertEqual(second["audit_rows_added"], 0)
             # selection is deterministic across runs
-            again = select_reprocess_items(build_inventory(kb),
+            again = select_reprocess_items(
+                build_inventory(kb, snapshot_root=snap_root),
                                            max_items=10)
             self.assertEqual([i["doc_id"] for i in again], ids)
             # GOOD was never registered (no implicit corpus wave)

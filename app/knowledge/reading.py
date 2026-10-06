@@ -215,41 +215,29 @@ class ReadingPublisher:
                 " ON d.source=v.source AND d.doc_id=v.doc_id"
                 " WHERE v.is_current=1 ORDER BY v.source, v.doc_id").fetchall()
             for version in versions:
-                # TQ3/TQ4: the ENTRY is the latest extraction that has
-                # USABLE text - a newer failed/empty re-extraction never
-                # silently drops the previous good entry (old evidence
-                # stays reachable); the newer attempt shows in the
-                # status page instead
-                extractions = self.kb._conn.execute(
-                    "SELECT extraction_id, status FROM extractions"
-                    " WHERE source=? AND doc_id=? AND version_id=?"
-                    " ORDER BY rowid DESC",
-                    (version["source"], version["doc_id"],
-                     version["version_id"])).fetchall()
-                extraction = None
-                newest = extractions[0] if extractions else None
-                for candidate in extractions:
-                    usable = self.kb._conn.execute(
-                        "SELECT COUNT(*) FROM blocks WHERE extraction_id=?"
-                        " AND LENGTH(TRIM(text)) > 0",
-                        (candidate["extraction_id"],)).fetchone()[0]
-                    if usable:
-                        extraction = candidate
-                        break
+                # S2/TQ4: the ENTRY is the shared effective extraction -
+                # the NEWEST extraction with at least one USABLE block -
+                # never a newer polluted/empty one. Reading, the default
+                # search index and the governance planner all use the
+                # SAME predicate (knowledge.effective).
+                from .effective import effective_extraction
+
+                extraction = effective_extraction(
+                    self.kb._conn, version["source"], version["doc_id"],
+                    version["version_id"])
                 title = unquote(version["title"] or version["doc_id"])
                 url = self._original_url(version["source"], version["doc_id"],
                                          version["version_id"])
                 if extraction is None:
                     without += 1
                     absent.append("- %s — %s；[原文](%s)" % (
-                        literal(title),
-                        newest["status"] if newest else "未提取", url))
+                        literal(title), "未提取", url))
                     continue
                 superseded_note = ""
-                if newest is not None and \
-                        newest["extraction_id"] != extraction["extraction_id"]:
-                    superseded_note = "（最新提取 %s 未通过，暂用上一版正文）" \
-                                      % newest["status"]
+                if not extraction.get("is_newest", True):
+                    superseded_note = ("（最新提取 %s 未通过，暂用上一版"
+                                       "正文）"
+                                       % extraction["newest_status"])
                 block_count = self.kb._conn.execute(
                     "SELECT COUNT(*) FROM blocks WHERE extraction_id=?"
                     " AND LENGTH(TRIM(text)) > 0",

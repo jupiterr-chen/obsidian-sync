@@ -493,9 +493,16 @@ def _generated_for_event(kb: KnowledgeStore, event_key: Optional[str]
 
 def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
                     prompt_version: str = "pv1",
-                    limit: int = 100) -> Dict[str, Any]:
+                    limit: int = 100,
+                    allowed_entities=None) -> Dict[str, Any]:
     """Drain the summary outbox.
 
+    - S1 scope: with a provider active, ONLY entities in
+      allowed_entities (a set of (entity_type, entity_id); None keeps
+      the direct programmatic API) generate or assemble paid evidence -
+      an out-of-scope event stays PENDING with a recorded reason until
+      the scope widens. Without a provider nothing sends, so the
+      no-provider blocked-revision path is unchanged.
     - no real evidence (no document text, no analysis, no claim) -> the
       event is consumed into ONE blocked(insufficient_evidence)
       revision recording the event identity - never a paid generation
@@ -514,6 +521,14 @@ def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
     errors: List[Dict[str, Any]] = []
     for item in pending_updates(kb, limit):
         event_key = item.get("event_key")
+        if chat is not None and allowed_entities is not None:
+            entity = (item["entity_type"], item["entity_id"])
+            if entity not in allowed_entities:
+                errors.append({
+                    "entity": "%s/%s" % entity,
+                    "error": "outside_active_scope",
+                    "status": "pending"})
+                continue  # stays pending; nothing assembled or sent
         already = _generated_for_event(kb, event_key)
         if already is not None:
             with kb._tx() as conn:

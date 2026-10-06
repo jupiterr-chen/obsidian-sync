@@ -85,16 +85,23 @@ SELECTION_SQL = (
 
 def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
     """R08/ADR0007: index only the CURRENT source version per document,
-    using that version's latest non-failed extraction (deterministic
-    created_at + extraction_id tiebreak). Historical extractions stay
-    queryable via the evidence/blocks APIs, never through the default
-    search index."""
+    using that version's EFFECTIVE extraction (S2: the newest
+    extraction with at least one usable block - a newer polluted or
+    empty extraction never evicts older good text from the default
+    index). Historical extractions stay queryable through the
+    evidence/blocks APIs, never through the default search index."""
+    from .effective import effective_extraction_ids
+
     with kb._lock:
+        extraction_ids = effective_extraction_ids(kb._conn)
+        if not extraction_ids:
+            return []
+        placeholders = ",".join("?" for _ in extraction_ids)
         rows = kb._conn.execute(
             "SELECT b.block_id, b.text, b.extraction_id FROM blocks b"
-            " JOIN extractions e ON e.extraction_id = b.extraction_id"
-            " WHERE e.extraction_id IN (" + SELECTION_SQL + ")"
-            " ORDER BY b.extraction_id, b.ordinal").fetchall()
+            " WHERE b.extraction_id IN (%s)"
+            " ORDER BY b.extraction_id, b.ordinal" % placeholders,
+            extraction_ids).fetchall()
     from .quality import block_evidence_usable
 
     return [row for row in rows

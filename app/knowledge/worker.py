@@ -316,7 +316,12 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                     prompt_version=analysis_prompt_version,
                     limit=analysis_limit,
                     max_attempts=int(analysis_settings.get(
-                        "max_attempts", 3)))
+                        "max_attempts", 3)),
+                    # S1: the claim obeys the ACTIVE identity and scope -
+                    # old queues from other providers/prompts and
+                    # out-of-sample documents never execute here
+                    model_identity=model_identity,
+                    scope=scope)
             else:
                 cycle["analysis_tasks"] = register_ready_analysis_tasks(kb)
                 cycle["analysis_executed"] = {"skipped": True,
@@ -366,8 +371,41 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
             if chat is not None:
                 cycle["summary_refreshes"] = enqueue_blocked_entity_refreshes(
                     kb)
+            # S1: with a provider active, C generates ONLY for the
+            # authorized entities. The allowed set comes from the
+            # summarization scope when configured; otherwise it derives
+            # from the deployment's own authorization boundary - the
+            # analysis scope symbols plus the configured topic rules -
+            # and NEVER from "no scope found" (empty = nothing sends)
+            allowed_entities = None
+            if chat is not None:
+                summarization = (config.extra or {}).get(
+                    "summarization") or {}
+                c_scope = summarization.get("scope")
+                if c_scope is None:
+                    effective_scope = analysis_settings.get("scope")
+                    if analysis_scope != "__unset__":
+                        effective_scope = analysis_scope
+                    allowed = set()
+                    for symbol in ((effective_scope or {})
+                                   .get("symbols") or []):
+                        allowed.add(("company",
+                                     (symbol or "").strip().upper()))
+                    for rule in (summarization.get("topics") or []):
+                        topic_id = str((rule or {}).get("id") or "").strip()
+                        if topic_id:
+                            allowed.add(("topic", topic_id))
+                    allowed_entities = allowed
+                else:
+                    allowed_entities = {
+                        ("company", (s or "").strip().upper())
+                        for s in (c_scope.get("symbols") or [])} | {
+                        ("topic", (t or "").strip())
+                        for t in (c_scope.get("topics") or [])}
             cycle["summaries"] = consume_updates(kb, chat=chat,
-                                                 ledger=ledger)
+                                                 ledger=ledger,
+                                                 allowed_entities=
+                                                 allowed_entities)
             if vault_dir and os.path.isdir(vault_dir):
                 cycle["summary_published"] = publish_pending_summaries(
                     kb, vault_dir,

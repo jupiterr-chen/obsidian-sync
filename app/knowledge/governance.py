@@ -61,14 +61,19 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
     plan: List[Dict[str, Any]] = []
     counts: Dict[str, int] = {}
 
-    # the current entry per current version = latest usable extraction
+    # the current entry per current version = the shared EFFECTIVE
+    # extraction (same predicate as the reading index and the search
+    # index - S2)
     current_entry_files = _current_entry_files(kb)
 
     # files referenced by consumed publish events (machine provenance)
     with kb._lock:
-        consumed = kb._conn.execute(
-            "SELECT source, doc_id, version_id, extraction_id FROM"
-            " publish_outbox WHERE status='consumed'").fetchall()
+        try:
+            consumed = kb._conn.execute(
+                "SELECT source, doc_id, version_id, extraction_id FROM"
+                " publish_outbox WHERE status='consumed'").fetchall()
+        except Exception:
+            consumed = []
 
     referenced = set()
     for row in consumed:
@@ -76,6 +81,14 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
 
         referenced.add(reading_filename(row["source"], row["doc_id"],
                                         row["extraction_id"]))
+
+    # S2/TA04: ACTUAL markdown references - every file linked from the
+    # current entry pages (开始阅读.md) is load-bearing for a reader
+    # following the index, whatever its extraction status is
+    linked_from_index = _files_linked_from_index(reading_dir)
+    # derived entry pages themselves are load-bearing by definition -
+    # they ARE the index readers open; never archive candidates
+    derived_pages = {"开始阅读.md", "处理状态.md"}
 
     for name in sorted(os.listdir(reading_dir)):
         path = os.path.join(reading_dir, name)
@@ -88,6 +101,7 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
         entry["manifest_owner"] = recorded.get("owner")
         entry["manifest_last_hash"] = recorded.get("last_hash")
         entry["referenced_by_publish"] = name in referenced
+        entry["linked_from_current_index"] = name in linked_from_index
         entry["is_current_entry"] = name in current_entry_files
 
         human_edit = (recorded.get("last_hash") is not None
@@ -98,9 +112,20 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
             entry["reason"] = ("content differs from the manifest's last"
                                " system write - a human edit is present;"
                                " keep and let a human resolve")
-        elif entry["is_current_entry"]:
+        elif (entry["is_current_entry"] or name in linked_from_index
+              or name in derived_pages):
             entry["disposition"] = DISPOSITION_KEEP
-            entry["reason"] = "current reading entry"
+            entry["reason"] = ("load-bearing: current entry, derived"
+                               " index/status page, or actually linked"
+                               " from the current reading index -"
+                               " archiving it would break the entry")
+        elif entry["referenced_by_publish"]:
+            # S2/TA04: a consumed publish event names this file - the
+            # machine still holds it as a delivered revision; keep until
+            # the entry provably moved away AND the event is superseded
+            entry["disposition"] = DISPOSITION_KEEP
+            entry["reason"] = ("referenced by a consumed publish event"
+                               " (delivered revision); keep")
         elif no_manifest:
             entry["disposition"] = DISPOSITION_UNKNOWN
             entry["reason"] = ("no writeback manifest record - ownership"
@@ -109,10 +134,11 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
         elif recorded.get("owner") in ("reading-publisher",
                                        "existing-text-export"):
             entry["disposition"] = DISPOSITION_ARCHIVE_CANDIDATE
-            entry["reason"] = ("machine-generated and superseded (a newer"
-                               " usable extraction is the current entry);"
-                               " archive-candidate for an authorized,"
-                               " verifiable archive outside the vault")
+            entry["reason"] = ("machine-generated, not the current entry,"
+                               " not referenced by any publish event or"
+                               " index link; archive-candidate for an"
+                               " authorized, verifiable archive outside"
+                               " the vault")
         else:
             entry["disposition"] = DISPOSITION_KEEP
             entry["reason"] = ("owner %r is not a reading generator"
@@ -130,11 +156,38 @@ def plan_file_governance(kb, reading_dir: str) -> Dict[str, Any]:
                     " per-path authorization with restore verification"}
 
 
+def _files_linked_from_index(reading_dir: str) -> set:
+    """File names actually linked from the CURRENT reading index pages
+    (开始阅读.md, and any markdown note linking siblings). A file a
+    reader can reach by following the index is load-bearing - never an
+    archive candidate, whatever its extraction status (S2/TA04)."""
+    import re
+
+    linked = set()
+    try:
+        names = sorted(os.listdir(reading_dir))
+    except OSError:
+        return linked
+    for name in names:
+        if not name.endswith(".md") or name.startswith("."):
+            continue
+        try:
+            with open(os.path.join(reading_dir, name), "r",
+                      encoding="utf-8") as handle:
+                text = handle.read()
+        except (OSError, ValueError):
+            continue
+        for target in re.findall(r"\]\(([^)]+\.md)\)", text):
+            linked.add(os.path.basename(target))
+    return linked
+
+
 def _current_entry_files(kb) -> set:
-    """Filenames serving as the CURRENT entry (latest usable extraction
-    per current version) - mirrors the reading index selection."""
+    """Filenames serving as the CURRENT entry - the shared EFFECTIVE
+    extraction predicate (knowledge.effective), same as the reading and
+    search indexes (S2)."""
+    from .effective import effective_extraction
     from .reading import reading_filename
-    from .quality import block_evidence_usable
 
     entries = set()
     with kb._lock:
@@ -142,19 +195,11 @@ def _current_entry_files(kb) -> set:
             "SELECT source, doc_id, version_id FROM kb_versions"
             " WHERE is_current=1").fetchall()
         for version in versions:
-            extractions = kb._conn.execute(
-                "SELECT extraction_id FROM extractions WHERE source=? AND"
-                " doc_id=? AND version_id=? ORDER BY rowid DESC",
-                (version["source"], version["doc_id"],
-                 version["version_id"])).fetchall()
-            for candidate in extractions:
-                usable = kb._conn.execute(
-                    "SELECT text FROM blocks WHERE extraction_id=? AND"
-                    " LENGTH(TRIM(text))>0 LIMIT 1",
-                    (candidate["extraction_id"],)).fetchone()
-                if usable and block_evidence_usable(usable["text"])[0]:
-                    entries.add(reading_filename(
-                        version["source"], version["doc_id"],
-                        candidate["extraction_id"]))
-                    break
+            chosen = effective_extraction(
+                kb._conn, version["source"], version["doc_id"],
+                version["version_id"])
+            if chosen:
+                entries.add(reading_filename(
+                    version["source"], version["doc_id"],
+                    chosen["extraction_id"]))
     return entries

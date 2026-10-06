@@ -77,6 +77,14 @@ class TQ4GovernanceTest(unittest.TestCase):
             stray = os.path.join(publisher.output, "text-stray.md")
             with open(stray, "w", encoding="utf-8") as handle:
                 handle.write("外部文件")
+            # a machine file NEVER delivered by a publish event and not
+            # linked from the index -> the true archive candidate
+            from knowledge.writeback import write_candidate
+
+            unreferenced = reading_filename("reports", "GOV",
+                                            "extr-gov-ghost")
+            write_candidate(publisher.output, unreferenced,
+                            "# ghost machine copy", owner="reading-publisher")
 
             before_state = sorted(os.listdir(publisher.output))
             plan = plan_file_governance(kb, publisher.output)
@@ -86,16 +94,23 @@ class TQ4GovernanceTest(unittest.TestCase):
 
             by_file = {f["file"]: f for f in plan["files"]}
             old = reading_filename("reports", "GOV", "extr-gov-old")
-            self.assertEqual(by_file[old]["disposition"],
+            # S2: the superseded file WAS delivered by a publish event -
+            # the machine still holds it as a delivered revision -> KEEP
+            self.assertEqual(by_file[old]["disposition"], DISPOSITION_KEEP)
+            self.assertTrue(by_file[old]["referenced_by_publish"])
+            # the never-delivered machine ghost is the archive candidate
+            self.assertEqual(by_file[unreferenced]["disposition"],
                              DISPOSITION_ARCHIVE_CANDIDATE)
+            self.assertFalse(by_file[unreferenced]
+                             ["referenced_by_publish"])
             self.assertEqual(by_file[current]["disposition"],
                              DISPOSITION_CONFLICT_HUMAN_EDIT)
             self.assertEqual(by_file["text-stray.md"]["disposition"],
                              DISPOSITION_UNKNOWN)
             # archive candidate carries full identity for a later
             # verifiable archive
-            self.assertTrue(by_file[old]["sha256"])
-            self.assertEqual(by_file[old]["manifest_owner"],
+            self.assertTrue(by_file[unreferenced]["sha256"])
+            self.assertEqual(by_file[unreferenced]["manifest_owner"],
                              "reading-publisher")
             self.assertIn("archive-candidate", plan["counts"])
         finally:

@@ -219,13 +219,18 @@ def main(argv=None) -> int:
         return 0 if result.get("published", 0) >= 0 else 1
     if args.command == "governance-plan":
         from knowledge.governance import plan_file_governance
-        from knowledge.store import KnowledgeStore
+        from knowledge.readonly import ReadOnlyStoreError, open_read_only
 
-        kb = KnowledgeStore(config.knowledge_db)
         try:
-            plan = plan_file_governance(kb, args.reading_dir)
+            ro = open_read_only(config.knowledge_db)
+        except ReadOnlyStoreError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)},
+                             ensure_ascii=False))
+            return 2
+        try:
+            plan = plan_file_governance(ro, args.reading_dir)
         finally:
-            kb.close()
+            ro.close()
         payload = json.dumps(plan, ensure_ascii=False, indent=2)
         if args.out:
             with open(args.out, "w", encoding="utf-8") as handle:
@@ -237,15 +242,24 @@ def main(argv=None) -> int:
         from knowledge.repair import (register_reprocess_batch,
                                       select_reprocess_items)
         from knowledge.text_quality import build_inventory
-        from knowledge.store import KnowledgeStore
+        from knowledge.readonly import ReadOnlyStoreError, open_read_only
 
-        kb = KnowledgeStore(config.knowledge_db)
+        # S4: both the dry-run preview and the selection scan are truly
+        # read-only - a pre-flight command must never initialize or
+        # migrate the database it inspects
         try:
-            inventory = build_inventory(kb)
-            actions = [a.strip() for a in args.actions.split(",")]                 if args.actions else None
-            items = select_reprocess_items(
-                inventory, actions=actions, max_items=args.max)
+            ro = open_read_only(config.knowledge_db)
+        except ReadOnlyStoreError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)},
+                             ensure_ascii=False))
+            return 2
+        try:
             if args.dry_run:
+                inventory = build_inventory(ro)
+                actions = [a.strip() for a in args.actions.split(",")] \
+                    if args.actions else None
+                items = select_reprocess_items(
+                    inventory, actions=actions, max_items=args.max)
                 result = {"batch_id": args.batch_id, "dry_run": True,
                           "selected": [
                               {"source": i["source"], "doc_id": i["doc_id"],
@@ -254,34 +268,55 @@ def main(argv=None) -> int:
                                    i.get("recommended_action")}
                               for i in items]}
             else:
+                # registration writes: run on the writable store, but the
+                # selection still comes from the read-only scan above
+                inventory = build_inventory(ro)
+                actions = [a.strip() for a in args.actions.split(",")] \
+                    if args.actions else None
+                items = select_reprocess_items(
+                    inventory, actions=actions, max_items=args.max)
+                ro.close()
                 from knowledge.extract import extract_config_digest
+                from knowledge.store import KnowledgeStore
 
                 digest = extract_config_digest(
                     config.ocr_config(), config.extra or {})
-                result = register_reprocess_batch(
-                    kb, digest, items, args.batch_id)
+                kb = KnowledgeStore(config.knowledge_db)
+                try:
+                    result = register_reprocess_batch(
+                        kb, digest, items, args.batch_id)
+                finally:
+                    kb.close()
                 result["note"] = ("jobs run with the normal worker"
                                   " cycle; old extractions/evidence stay"
                                   " intact")
         finally:
-            kb.close()
+            ro.close()
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     if args.command == "quality-inventory":
-        from .text_quality import (build_inventory, inventory_summary)
-        from .store import KnowledgeStore
+        from .readonly import ReadOnlyStoreError, open_read_only
+        from .text_quality import build_inventory, inventory_summary
 
-        kb = KnowledgeStore(config.knowledge_db)
+        # S4/TA06: strictly read-only - an advertised audit command must
+        # never initialize, migrate or journal the database it inspects
+        try:
+            ro = open_read_only(config.knowledge_db)
+        except ReadOnlyStoreError as exc:
+            print(json.dumps({"ok": False, "error": str(exc)},
+                             ensure_ascii=False))
+            return 2
         try:
             reading_dir = args.reading_dir or (
                 (config.extra or {}).get("vault_dir")
                 and os.path.join((config.extra or {}).get("vault_dir"),
                                  "解析正文"))
             inventory = build_inventory(
-                kb, reading_dir=reading_dir,
-                include_history=bool(args.include_history))
+                ro, reading_dir=reading_dir,
+                include_history=bool(args.include_history),
+                snapshot_root=config.snapshot_root)
         finally:
-            kb.close()
+            ro.close()
         payload = json.dumps(inventory, ensure_ascii=False, indent=2)
         if args.out:
             with open(args.out, "w", encoding="utf-8",

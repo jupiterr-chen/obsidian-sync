@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS reprocess_batches (
     doc_id TEXT NOT NULL,
     version_id TEXT NOT NULL,
     recommended_action TEXT,
+    recipe_digest TEXT,
     registered_at TEXT NOT NULL,
     UNIQUE (batch_id, source, doc_id, version_id)
 );
@@ -100,16 +101,74 @@ def select_reprocess_items(inventory: Dict[str, Any],
 def register_reprocess_batch(kb: KnowledgeStore, digest: str,
                              items: List[Dict[str, Any]],
                              batch_id: str) -> Dict[str, Any]:
-    """Register ONE explicit reprocess batch under the current recipe.
+    """Register ONE explicit reprocess batch under a FROZEN recipe.
 
-    Idempotent per (batch, item) and per job identity - three
-    consecutive runs register each item exactly once. The audit table
-    records what was selected and when; the jobs table is the durable
-    execution state (lease/expiry semantics give crash resume for
-    free). Nothing is deleted or overwritten: the new extraction is a
-    NEW identity and old evidence stays reachable."""
+    S3/TA05: the FIRST registration freezes the member list and the
+    recipe digest for that batch id. Re-running the same batch id ONLY
+    ever restores the frozen members - a fresh inventory selection that
+    now contains different documents (e.g. the next candidate after A
+    was fixed) is refused as a divergence, never silently added; new
+    members require a NEW batch id. A different recipe digest for the
+    same batch id is refused outright. The per-invocation max is a
+    slice, not a batch-size limit - the freeze is what bounds the
+    batch. Idempotent per member; the jobs table stays the durable
+    execution state; nothing is deleted or overwritten."""
     with kb._tx() as conn:
         conn.executescript(REPROCESS_SCHEMA)
+        # forward-fill recipe_digest for pre-S3 rows (they froze under
+        # the digest that created them; unknown rows record none)
+        conn.execute(
+            "UPDATE reprocess_batches SET recipe_digest=? WHERE"
+            " batch_id=? AND recipe_digest IS NULL", (digest, batch_id))
+        frozen = conn.execute(
+            "SELECT source, doc_id, version_id FROM reprocess_batches"
+            " WHERE batch_id=? ORDER BY source, doc_id",
+            (batch_id,)).fetchall()
+    frozen_members = [(row["source"], row["doc_id"], row["version_id"])
+                      for row in frozen]
+    frozen_digest_row = None
+    with kb._lock:
+        row = kb._conn.execute(
+            "SELECT recipe_digest FROM reprocess_batches WHERE"
+            " batch_id=? LIMIT 1", (batch_id,)).fetchone()
+        frozen_digest_row = row["recipe_digest"] if row else None
+
+    if frozen_members:
+        if frozen_digest_row is not None and \
+                frozen_digest_row != digest:
+            return {"batch_id": batch_id, "refused": True,
+                    "reason": "recipe_digest_mismatch",
+                    "frozen_recipe": frozen_digest_row,
+                    "requested_recipe": digest,
+                    "note": "open a NEW batch id for a different recipe"}
+        incoming = {(item["source"], item["doc_id"],
+                     item["version_id"]) for item in items}
+        frozen_set = set(frozen_members)
+        added = sorted(incoming - frozen_set)
+        missing = sorted(frozen_set - incoming)
+        if added:
+            return {"batch_id": batch_id, "refused": True,
+                    "reason": "membership_divergence",
+                    "frozen_members": len(frozen_members),
+                    "attempted_new_members": [
+                        {"source": s, "doc_id": d, "version_id": v}
+                        for s, d, v in added],
+                    "note": ("this batch id is FROZEN with its original"
+                             " members; register new documents under a"
+                             " NEW batch id")}
+        # pure resume (or subset call): restore the frozen members only
+        items = [item for item in items
+                 if (item["source"], item["doc_id"],
+                     item["version_id"]) in frozen_set]
+        if missing:
+            # the caller selected fewer than frozen (inventory
+            # changed): still register the missing frozen members so a
+            # resume is complete - the freeze, not the fresh selection,
+            # defines the batch
+            items = list(items) + [
+                {"source": s, "doc_id": d, "version_id": v}
+                for s, d, v in missing]
+
     registered_jobs = registered_audit = 0
     now = utc_now()
     for item in items:
@@ -117,13 +176,17 @@ def register_reprocess_batch(kb: KnowledgeStore, digest: str,
             cursor = conn.execute(
                 "INSERT OR IGNORE INTO reprocess_batches (batch_id,"
                 " source, doc_id, version_id, recommended_action,"
-                " registered_at) VALUES (?,?,?,?,?,?)",
+                " recipe_digest, registered_at) VALUES (?,?,?,?,?,?,?)",
                 (batch_id, item["source"], item["doc_id"],
-                 item["version_id"], item.get("recommended_action"), now))
+                 item["version_id"], item.get("recommended_action"),
+                 digest, now))
             registered_audit += cursor.rowcount
         if kb.register_job(item["source"], item["doc_id"],
                            item["version_id"], "extract", digest):
             registered_jobs += 1
-    return {"batch_id": batch_id, "items": len(items),
-            "audit_rows_added": registered_audit,
-            "jobs_registered": registered_jobs}
+    result = {"batch_id": batch_id, "items": len(items),
+              "audit_rows_added": registered_audit,
+              "jobs_registered": registered_jobs}
+    if frozen_members:
+        result["resumed_frozen_members"] = len(frozen_members)
+    return result

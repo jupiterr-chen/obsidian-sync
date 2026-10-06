@@ -37,6 +37,14 @@ def _seed_doc(kb, doc_id, sha, extraction_ids, status="ready",
         "state": "ready", "content_changed_at": None}], stamp)
     if with_blob:
         kb.record_blob(sha, 10, "aa/%s" % sha, stamp)
+        # F2: the FILE must exist under the snapshot root for the
+        # source to count as available
+        import tempfile as _tf
+
+        root = os.path.join(os.path.dirname(kb.path), "snaps")
+        os.makedirs(os.path.join(root, "aa"), exist_ok=True)
+        with open(os.path.join(root, "aa", sha), "wb") as handle:
+            handle.write(b"0123456789")
     for index, extraction_id in enumerate(extraction_ids):
         kb.record_extraction({
             "extraction_id": extraction_id, "source": "reports",
@@ -91,7 +99,9 @@ class TQ0InventoryTest(unittest.TestCase):
                 "last_seen_at": "2026-10-04T00:00:00Z"}],
                 "2026-10-04T00:00:00Z")
 
-            inventory = build_inventory(kb)
+            inventory = build_inventory(
+                kb, snapshot_root=os.path.join(
+                    os.path.dirname(kb.path), "snaps"))
             self.assertEqual(inventory["counts"]["documents"], 4)
             self.assertEqual(inventory["counts"]["versions_current"], 3)
             self.assertEqual(inventory["counts"]["extractions"], 3)
@@ -101,6 +111,11 @@ class TQ0InventoryTest(unittest.TestCase):
             self.assertEqual(actions["LEGACY"],
                              ACTION_NATIVE_REEXTRACT)
             self.assertEqual(actions["NOSRC"], ACTION_MISSING_SOURCE)
+            nosrc = next(d for d in inventory["documents"]
+                         if d["doc_id"] == "NOSRC")
+            self.assertFalse(nosrc["source_available"])
+            self.assertEqual(nosrc["source_check"]["reason"],
+                             "no_blob_record")
             self.assertEqual(actions["EMPTY"], "manual-review")
             legacy = next(d for d in inventory["documents"]
                           if d["doc_id"] == "LEGACY")
@@ -110,7 +125,9 @@ class TQ0InventoryTest(unittest.TestCase):
                              "candidate must not depend on the marker")
             self.assertEqual(legacy["engine"], "stdlib-pdf@1")
             # reproducible: same store -> same manifest hash
-            again = build_inventory(kb)
+            again = build_inventory(
+                kb, snapshot_root=os.path.join(
+                    os.path.dirname(kb.path), "snaps"))
             self.assertEqual(inventory["manifest_hash"],
                              again["manifest_hash"])
             # read-only claim carried in the payload
@@ -126,7 +143,10 @@ class TQ0InventoryTest(unittest.TestCase):
             _seed_doc(kb, "H", "h1", ["extr-h1"])
             _seed_doc(kb, "H", "h2", ["extr-h2"], version_id="v2",
                       current=False)
-            inventory = build_inventory(kb, include_history=True)
+            inventory = build_inventory(
+                kb, include_history=True,
+                snapshot_root=os.path.join(
+                    os.path.dirname(kb.path), "snaps"))
             self.assertEqual(inventory["counts"]["documents"], 1)
             self.assertEqual(inventory["counts"]["versions_current"], 1)
             self.assertEqual(inventory["counts"]["versions_historical"],
@@ -149,7 +169,10 @@ class TQ0InventoryTest(unittest.TestCase):
             with open(os.path.join(reading_dir, name), "w",
                       encoding="utf-8") as handle:
                 handle.write("# note\n")
-            inventory = build_inventory(kb, reading_dir=reading_dir)
+            inventory = build_inventory(
+                kb, reading_dir=reading_dir,
+                snapshot_root=os.path.join(
+                    os.path.dirname(kb.path), "snaps"))
             self.assertEqual(inventory["counts"]["files"], 1)
             entry = inventory["reading_files"][0]
             self.assertEqual(entry["file"], name)

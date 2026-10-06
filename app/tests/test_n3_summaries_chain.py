@@ -279,7 +279,10 @@ class WorkerChainIntegrationTest(unittest.TestCase):
             snapshot_root=os.path.join(tmp, "state", "snaps"),
             library_config="unused",
             extra={"vault_dir": vault,
-                   "public_base_url": "http://127.0.0.1:8765"})
+                   "public_base_url": "http://127.0.0.1:8765",
+                   # S1: a provider-carrying cycle declares its sample -
+                   # without a declared scope nothing is authorized
+                   "analysis": {"scope": {"symbols": ["600519"]}}})
         # the fixture PDFs are synthetic bytes (their extractions land in
         # review/failed by the quality gate - honest), so seed ONE
         # text-ready document to exercise the analysis chain end to end
