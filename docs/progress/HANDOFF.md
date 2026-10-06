@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **最新：用户要求立即开始正式服务器重识别，新增问题另列 fix；已启动独立发布/修复监督进程。应用仍固定 `9d1b04f`，未改应用代码。** 自动冻结备份→切换 API/library→458 份正式候选重处理/分批发布→恢复增量 worker。无需再次授权或用户回来触发。恢复优先读 operation 的 `production/supervisor-status.json`、`production/repair-status.json`；下面只跑样本后等待的安排已被覆盖。详情 [运行记录](RELEASE-REPAIR-20261006.md)。
+
 > **2026-10-06 用户已授权本次生产发布及正文修复，由 Codex 直接执行。服务器独立操作已启动；不要重新发开发任务或再次请求相同授权。** 固定应用源码 `9d1b04f`，操作 ID `release-9d1b04f-20261006`。首先读取[运行记录](RELEASE-REPAIR-20261006.md)与服务器 `operations/release-9d1b04f-20261006/{host-status,sample-status,repair-status}.json` 实际存在的文件；未完成样本验收前生产仍旧版。模型关闭、保留全部旧正文和人工内容。下方未授权状态为历史。
 
 > **2026-10-06终轮验收通过：最终源码9d1b04f（含Codex补齐缺页/质量及claim资料范围）。29探针通过，431回归通过/2跳过，干净源码15项通过。S1–S4/F1–F3开发续验结束，不再下发SF返工，F4仍后置。** [最终报告](SF-ACCEPTANCE-20261006.md)、[发布与正文修复计划](../36-validated-release-and-text-repair.md)。本次未部署、未真实模型调用、未历史重处理/归档；生产仍67c6985r2。发布、真实样本/批次及模型范围/预算须分别授权。下方为历史记录。
