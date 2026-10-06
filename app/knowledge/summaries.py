@@ -370,12 +370,20 @@ def _summary_evidence(kb: KnowledgeStore, entity_type: str,
     keep their historical keys (claim_id/revision/statement/...).
 
     S1/SF01: ``allowed_documents`` (a set of authorized source/doc_id
-    pairs, or None for the direct programmatic API) bounds the EXTERNAL
-    material - classification rules decide WHICH ENTITY a summary is
-    for, never WHICH DOCUMENTS may leave the machine. Claims are the
-    system's own reviewed research memory and are not filtered by the
-    document allowlist."""
+    pairs, or None for the direct programmatic API) bounds both source
+    text and derived research memory. Review status is not permission to
+    send a claim: its evidence and counterevidence must all be in scope.
+    Unattributed claims stay local until their material scope is known.
+    """
     claims = _entity_claim_evidence(kb, entity_type, entity_id)
+    if allowed_documents is not None:
+        def in_scope(claim):
+            references = (claim.get("evidence") or []) + (claim.get("counterevidence") or [])
+            return bool(references) and all(
+                isinstance(ref, dict) and (ref.get("source"), ref.get("doc_id"))
+                in allowed_documents for ref in references)
+
+        claims = [claim for claim in claims if in_scope(claim)]
     for claim in claims:
         claim.setdefault("kind", "claim")
     return claims + _entity_document_evidence(

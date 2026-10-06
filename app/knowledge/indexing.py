@@ -64,10 +64,9 @@ class SearchFilters:
     collections: Optional[List[str]] = None  # only "source_documents" exists today
 
 
-# TQ2 v2: binary-polluted blocks (byte-decoded glyph indexes) are
-# excluded from the DEFAULT search index - they remain reachable
-# through the evidence/blocks APIs and the reading vault.
-SELECTION_POLICY = "current-version-latest-extraction-v2"
+# v3: the shared selection prefers complete, ready extractions; polluted
+# blocks are excluded from default search. Old evidence remains reachable.
+SELECTION_POLICY = "current-version-complete-extraction-v3"
 
 
 SELECTION_SQL = (
