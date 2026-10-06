@@ -1,0 +1,63 @@
+{
+  "received_commit": "60c5f76",
+  "accepted_source_commit": "9d1b04fc1ae7fa8a6e067af46f65b842773a523e",
+  "scope": "code and isolated acceptance; no production deployment or real model calls",
+  "received_regression": {
+    "passed": 426,
+    "skipped": 2,
+    "total": 428
+  },
+  "final_regression": {
+    "passed": 431,
+    "skipped": 2,
+    "total": 433,
+    "seconds": 84.267
+  },
+  "probes": {
+    "sf": {
+      "passed": 6,
+      "total": 6
+    },
+    "tqma": {
+      "passed": 7,
+      "total": 7
+    },
+    "ma": {
+      "passed": 3,
+      "total": 3
+    },
+    "ac1": {
+      "passed": 7,
+      "total": 7
+    },
+    "original": {
+      "passed": 6,
+      "total": 6
+    }
+  },
+  "reviewer_boundary_tests": {
+    "tests": 5,
+    "red_failed_assertions_including_subtests": 8,
+    "green_tests_passed": 5
+  },
+  "clean_git_archive_checks": {
+    "tests": 15,
+    "passed": 15,
+    "seconds": 3.326
+  },
+  "production_read_only": {
+    "app_image": "obsidian-sync:67c6985r2",
+    "old_research_kb_containers": "Exited",
+    "jobs": {
+      "snapshot_done": 524,
+      "extract_done": 1144,
+      "extract_failed": 450
+    },
+    "extraction_records": {
+      "ready": 230,
+      "review": 767,
+      "failed": 144
+    },
+    "note": "historical task/record counts, not deduplicated documents or OCR candidates"
+  }
+}

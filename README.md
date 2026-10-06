@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+**最新：代码续验通过。固定源码9d1b04f，29探针与431回归通过（2跳过）。** [最终验收](docs/progress/SF-ACCEPTANCE-20261006.md)、[下一步发布与正文修复](docs/36-validated-release-and-text-repair.md)。未部署；真实样本、历史数据修复及模型质量按各自阶段授权验收。以下旧验收信息为历史记录。
+
 最新续验：0f9cb27的23探针与420回归通过（2跳过）；S4/F1通过，S1/S2/S3/F3仍须补齐原任务组合条件。见[续验报告](docs/progress/S1234-ACCEPTANCE-20261006.md)、[原任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。未部署，不扩展范围，F4仍后置。
 
 最新验收（2026-10-06）：fbc24bd原16反例通过，410回归通过/2跳过；四组执行边界按功能续修，见[报告](docs/progress/TQMA-REVIEW-20261006.md)、[任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。现网未变，未授权启用模型或历史重处理；不重做已通过修复。

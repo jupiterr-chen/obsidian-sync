@@ -1,5 +1,7 @@
 # 下一位开发agent提示词
 
+> **本轮开发续验已结束：9d1b04f通过。** 见[终轮验收](progress/SF-ACCEPTANCE-20261006.md)。不要重新执行下方历史返工要求；下一步使用[发布与正文修复计划](36-validated-release-and-text-repair.md)。F4仍后置，生产与数据批次授权要求不变。
+
 **最新续验入口（保持原任务范围）**：从0f9cb27519d3cae1b513538667f1eb2d091964bf继续，先读docs/progress/S1234-ACCEPTANCE-20261006.md。原23探针与420回归通过（2跳过），S4/F1通过，不重做。只补齐原S1/S2/S3/F3未闭环条件：主题规则不能扩大C资料发送范围；部分污染/缺页新稿不能压掉完整健康旧稿；人工目录wikilink及片段引用须保护；批次完整清单原子冻结、首次登记中断可恢复、JobRunner执行时校验冻结recipe；多次预算等待不得耗尽故障重试。先复现scripts/review-s1234-followup-20261006.py的6项，再与原23探针、针对性集成及全回归统一交付。F4仍后置，不启用后来撤回的任务扩展。以下原任务与授权边界继续适用。
 
 请在`D:\2.Develop\8.Obsidian\obsidian-sync`继续，先读AGENTS.md、docs/progress/TQMA-REVIEW-20261006.md、docs/34-tqma-followup-taskbook.md。验收基线fbc24bd64102f57fded3b7875e3ce9b94ede51a6。410回归通过/2跳过、原6+AC1 7+MA3探针已由Codex复跑通过，不要重做这些修复或迁移。
