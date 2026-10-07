@@ -548,7 +548,7 @@ def build_status(config, catalog) -> Dict[str, Any]:
         "recent_runs": run_panel["recent"],
         "sync": _sync_panel(config, now_iso),
         "notices": [
-            "本页仅展示状态，不触发入库；‘刷新状态’只重新读取数据。",
+            "‘刷新状态’只重新读取数据；‘立即同步资料’会检查来源索引并更新卡片，不触发正文解析或模型调用。",
             "元数据检索为标题/摘要/日期/代码检索，不是 PDF 全文或语义检索。",
             "本工具不监控上游下载任务，来源索引时间仅为本地文件观测。",
         ],

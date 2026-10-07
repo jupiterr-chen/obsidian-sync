@@ -1,7 +1,7 @@
 """Chinese status dashboard: root HTML plus local CSS/JS assets.
 
-No external CDN or assets are used. The page only reads the local status API
-and the existing metadata search API. All dynamic values are inserted with
+No external CDN or assets are used. A bounded explicit action can run library
+ingestion; status and metadata search stay read-only. Dynamic values use
 ``textContent`` (never ``innerHTML``) so titles/summaries cannot inject markup.
 """
 
@@ -36,6 +36,11 @@ DASHBOARD_HTML = """<!doctype html>
 
 <section class="panel">
   <h2>入库状态</h2>
+  <div class="hero-actions">
+    <button id="ingest-btn" type="button" disabled>立即同步资料</button>
+    <span id="ingest-action-state" role="status" aria-live="polite">正在读取任务状态…</span>
+  </div>
+  <p class="muted">立即检查已下载资料并更新卡片，跳过自动接入等待。正文解析仍按队列执行，不会启动第二个 OCR 任务。卡片更新完成不等于 Windows 已接收完成。</p>
   <div id="ingestion" class="kv">正在加载…</div>
 </section>
 
@@ -56,6 +61,9 @@ DASHBOARD_HTML = """<!doctype html>
 
 <section class="panel">
   <h2>Windows 同步（Syncthing，仅只读观测）</h2>
+  <p class="muted">Syncthing 文件监听开启时，文件变化会触发同步；“每小时扫描”是兜底检查，不是每小时才传输一次。两端在线且无积压时，小文件通常在秒到分钟级到达，实际以下方状态为准。</p>
+  <button id="syncthing-open-btn" type="button">打开本机 Syncthing</button>
+  <p class="muted">可在 Syncthing 中展开 research-vault 文件夹，手动点“重新扫描”。此入口打开当前电脑，不是服务器；它不会重新下载 Discord 附件或重跑正文解析。</p>
   <div id="sync" class="muted">正在加载…</div>
 </section>
 
@@ -347,7 +355,7 @@ DASHBOARD_JS = r"""
     var pairs = [
       ["总体状态", ing.state_label || "未知"],
       ["调度状态", sched.state_label || "未知"],
-      ["配置间隔", fmtDuration(sched.interval_seconds)],
+      ["资料目录自动检查间隔", fmtDuration(sched.interval_seconds)],
       ["正在运行", ing.running ? "是" : "否"],
       ["最近一次尝试（调度）", fmtLocal(sched.last_attempt_started_at)],
       ["最近一次成功（调度）", sched.last_ok === true ? fmtLocal(sched.last_finished_at) : (sched.last_ok === false ? "最近调度失败" : "未知")],
@@ -361,6 +369,41 @@ DASHBOARD_JS = r"""
     if (render.error) { pairs.push(["最近渲染错误", render.error]); }
     if (sched.last_error) { pairs.push(["调度错误", sched.last_error]); }
     kv(els.ingestion, pairs);
+    renderManualIngest(data.manual_ingest, ing.running);
+  }
+
+  var ingestSubmitting = false;
+  function renderManualIngest(action, scheduledRunning) {
+    action = action || {};
+    var running = action.state === "running";
+    var cooldown = action.retry_after_seconds || 0;
+    els.ingestButton.disabled = ingestSubmitting || !!state.error || !action.state || running || !!scheduledRunning || cooldown > 0;
+    els.ingestButton.textContent = running ? "正在接入资料…" : "立即同步资料";
+    els.ingestState.textContent = (action.message || "当前服务未提供手动接入功能。") +
+      (cooldown > 0 && !running ? "（" + cooldown + " 秒后可再次触发）" : "") +
+      (scheduledRunning && !running ? " 当前已有自动接入任务运行。" : "");
+  }
+
+  function manualIngest() {
+    ingestSubmitting = true;
+    els.ingestButton.disabled = true;
+    els.ingestState.textContent = "正在提交资料检查…";
+    fetch("/api/v1/actions/ingest", {
+      method: "POST", credentials: "same-origin", cache: "no-store",
+      headers: { "Content-Type": "application/json", "X-ResearchKB-Action": "ingest" },
+      body: "{}"
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok && r.status !== 429) { throw new Error(data.error || ("HTTP " + r.status)); }
+        ingestSubmitting = false;
+        renderManualIngest(data, false);
+        load();
+      });
+    }).catch(function (err) {
+      ingestSubmitting = false;
+      els.ingestButton.disabled = false;
+      els.ingestState.textContent = "提交未确认：" + err.message + "。先刷新状态确认是否已有任务运行，再重试。";
+    });
   }
 
   function renderSources(data) {
@@ -583,11 +626,16 @@ DASHBOARD_JS = r"""
   function init() {
     els = {
       meta: $("refresh-meta"), button: $("refresh-btn"), banner: $("banner"),
+      ingestButton: $("ingest-btn"), ingestState: $("ingest-action-state"),
       overview: $("overview"), ingestion: $("ingestion"), sources: $("sources"),
       changes: $("changes"), abnormal: $("abnormal"), sync: $("sync"),
       runs: $("runs"), details: $("details"), notices: $("notices")
     };
     els.button.addEventListener("click", load);
+    els.ingestButton.addEventListener("click", manualIngest);
+    $("syncthing-open-btn").addEventListener("click", function () {
+      window.open("http://127.0.0.1:18384", "_blank", "noopener,noreferrer");
+    });
     var form = $("search-form");
     if (form) { form.addEventListener("submit", search); }
     load();

@@ -21,6 +21,7 @@ from .fileserve import (
     parse_range,
 )
 from .status import build_status
+from .manual_ingest import ManualIngest
 
 
 CHUNK = 256 * 1024
@@ -29,6 +30,7 @@ CHUNK = 256 * 1024
 class Handler(BaseHTTPRequestHandler):
     config: Config = None  # type: ignore[assignment]
     catalog: Catalog = None  # type: ignore[assignment]
+    manual_ingest: ManualIngest = None  # type: ignore[assignment]
     server_version = "ResearchKB/0.1"
 
     # ---------------------------------------------------------------- helpers
@@ -54,6 +56,48 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         self._dispatch(head_only=False)
+
+    def do_POST(self) -> None:  # noqa: N802
+        # Only this fixed, non-LLM first-layer action is exposed. No commands,
+        # paths, source overrides, Syncthing credentials or worker controls.
+        try:
+            self.connection.settimeout(5)
+            if self.headers.get("Transfer-Encoding"):
+                return self._error(400, "unsupported request body")
+            length = int(self.headers.get("Content-Length", "0"))
+            if not 0 <= length <= 4096:
+                return self._error(400, "request body too large")
+            # Consume bounded small bodies before rejecting a request, so a
+            # socket close does not discard the JSON error with a TCP reset.
+            body = self.rfile.read(length)
+            if len(body) != length:
+                return self._error(400, "incomplete request body")
+        except (ValueError, OSError):
+            return self._error(400, "invalid request body")
+        if urlparse(self.path).path != "/api/v1/actions/ingest":
+            return self._error(404, "not found")
+        configured = urlparse(self.config.public_base_url)
+        allowed = {configured.scheme + "://" + configured.netloc}
+        port = self.server.server_address[1]
+        allowed.update("http://%s:%d" % (host, port) for host in ("127.0.0.1", "localhost"))
+        origin = self.headers.get("Origin", "")
+        # The existing LAN dashboard has no user accounts. Keep its network
+        # trust boundary, and reject cross-origin requests and DNS rebinding.
+        if (origin not in allowed or urlparse(origin).netloc != self.headers.get("Host")
+                or self.headers.get("X-ResearchKB-Action") != "ingest"
+                or self.headers.get("Sec-Fetch-Site") not in (None, "same-origin")):
+            return self._error(403, "use the same-origin dashboard")
+        if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
+            return self._error(415, "application/json required")
+        try:
+            if not 0 < length <= 64:
+                return self._error(400, "empty JSON object required")
+            if json.loads(body) != {}:
+                return self._error(400, "empty JSON object required")
+        except (ValueError, OSError):
+            return self._error(400, "invalid request body")
+        status, result = self.manual_ingest.request()
+        self._send_json(status, result)
 
     def _dispatch(self, head_only: bool) -> None:
         try:
@@ -175,7 +219,9 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json(200, payload, head_only)
 
     def _status(self, head_only: bool) -> None:
-        self._send_json(200, build_status(self.config, self.catalog), head_only)
+        payload = build_status(self.config, self.catalog)
+        payload["manual_ingest"] = self.manual_ingest.snapshot()
+        self._send_json(200, payload, head_only)
 
     def _search(self, query, head_only: bool) -> None:
         def first(key, default=None):
@@ -342,7 +388,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def build_server(config: Config, catalog: Optional[Catalog] = None) -> ThreadingHTTPServer:
     catalog = catalog or Catalog(config.catalog_db)
-    handler = type("BoundHandler", (Handler,), {"config": config, "catalog": catalog})
+    handler = type("BoundHandler", (Handler,), {
+        "config": config, "catalog": catalog, "manual_ingest": ManualIngest(config),
+    })
     server = ThreadingHTTPServer((config.bind_host, config.bind_port), handler)
     server.daemon_threads = True
     return server

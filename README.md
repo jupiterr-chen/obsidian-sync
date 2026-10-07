@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+[自动接入频率与手动同步](docs/40-manual-sync-and-cadence.md)：新增“立即同步资料”和本机 Syncthing 入口已完成本地验收，尚未部署；现网自动接入/历史修复保持原调度。
+
 **使用入口（2026-10-07）：[知识库 API 使用说明](docs/39-knowledge-api-usage.md)**。包含 Windows 连接、认证、全文检索、证据/正文和公司背景包示例，已只读核对现网。应用 `9d1b04f` 已发布，服务器历史正文修复按[运行记录](docs/progress/RELEASE-REPAIR-20261006.md)续行；[GLM 单次分析试用](docs/progress/GLM-TENCENT-PILOT-20261007.md)已完成，生产常驻模型服务尚未启用。下方“未部署”等均为历史阶段记录，不代表当前状态。
 
 **最新：代码续验通过。固定源码9d1b04f，29探针与431回归通过（2跳过）。** [最终验收](docs/progress/SF-ACCEPTANCE-20261006.md)、[下一步发布与正文修复](docs/36-validated-release-and-text-repair.md)。未部署；真实样本、历史数据修复及模型质量按各自阶段授权验收。以下旧验收信息为历史记录。
