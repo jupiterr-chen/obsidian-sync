@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-07 下一阶段使用方案已落地，当前仅文档规划。** 用户要求历史修复继续运行，同时准备如何消化研报并接入投资框架。见[研究使用方案](../37-research-use-and-investment-workflow.md)与[研究模板和提示词](../38-research-templates-and-prompts.md)。建议两家公司、一主题、约十二份核对资料开展 B4 试点，复用已有 B/C/D；未启用模型、未部署新代码、未更改服务器修复任务。现有公司研究/主题研究/周报/分析草稿均为人工区，自动总结应使用已登记生成区。正式试点前补齐关注对象、目标应用和 provider/资料范围/预算。本方案不重新开启已通过的开发返工，也不覆盖当前修复授权。
+
 > **2026-10-07：已按用户明确授权修复 Obsidian 保存 EPERM。** 两端仅将 `research-vault.ignorePerms` 设为 true，本地 2,049 个 Markdown 清除 ReadOnly；全量正文 hash 与 NTFS ACL 不变，原报错文件可写，双方同步 0 错误/0 待同步。保持该配置，后续部署不要用旧配置覆盖。OCR 未中断，最新观察第 212/458 份。证据与恢复路径见[运行记录](RELEASE-REPAIR-20261006.md)。
 
 > **最新：用户要求立即开始正式服务器重识别，新增问题另列 fix；已启动独立发布/修复监督进程。应用仍固定 `9d1b04f`，未改应用代码。** 自动冻结备份→切换 API/library→458 份正式候选重处理/分批发布→恢复增量 worker。无需再次授权或用户回来触发。恢复优先读 operation 的 `production/supervisor-status.json`、`production/repair-status.json`；下面只跑样本后等待的安排已被覆盖。详情 [运行记录](RELEASE-REPAIR-20261006.md)。
