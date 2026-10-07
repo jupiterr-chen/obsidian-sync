@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+**使用入口（2026-10-07）：[知识库 API 使用说明](docs/39-knowledge-api-usage.md)**。包含 Windows 连接、认证、全文检索、证据/正文和公司背景包示例，已只读核对现网。应用 `9d1b04f` 已发布，服务器历史正文修复按[运行记录](docs/progress/RELEASE-REPAIR-20261006.md)续行；[GLM 单次分析试用](docs/progress/GLM-TENCENT-PILOT-20261007.md)已完成，生产常驻模型服务尚未启用。下方“未部署”等均为历史阶段记录，不代表当前状态。
+
 **最新：代码续验通过。固定源码9d1b04f，29探针与431回归通过（2跳过）。** [最终验收](docs/progress/SF-ACCEPTANCE-20261006.md)、[下一步发布与正文修复](docs/36-validated-release-and-text-repair.md)。未部署；真实样本、历史数据修复及模型质量按各自阶段授权验收。以下旧验收信息为历史记录。
 
 最新续验：0f9cb27的23探针与420回归通过（2跳过）；S4/F1通过，S1/S2/S3/F3仍须补齐原任务组合条件。见[续验报告](docs/progress/S1234-ACCEPTANCE-20261006.md)、[原任务书](docs/34-tqma-followup-taskbook.md)、[提示词](docs/35-tqma-followup-prompt.md)。未部署，不扩展范围，F4仍后置。
@@ -19,7 +21,7 @@
 1. [总体设计](docs/01-architecture.md)
 2. [数据与版本设计](docs/02-data-and-provenance.md)
 3. [接入、解析与检索](docs/03-processing-and-search.md)
-4. [接口契约](docs/04-api-contract.md)
+4. [API 实际使用说明](docs/39-knowledge-api-usage.md) · [接口契约](docs/04-api-contract.md)
 5. [长期记忆与应用集成](docs/05-memory-and-analysis.md)
 6. [部署与运维](docs/06-operations.md)
 7. [分阶段任务](docs/07-delivery-plan.md)
