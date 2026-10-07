@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-07：已按用户明确授权修复 Obsidian 保存 EPERM。** 两端仅将 `research-vault.ignorePerms` 设为 true，本地 2,049 个 Markdown 清除 ReadOnly；全量正文 hash 与 NTFS ACL 不变，原报错文件可写，双方同步 0 错误/0 待同步。保持该配置，后续部署不要用旧配置覆盖。OCR 未中断，最新观察第 212/458 份。证据与恢复路径见[运行记录](RELEASE-REPAIR-20261006.md)。
+
 > **最新：用户要求立即开始正式服务器重识别，新增问题另列 fix；已启动独立发布/修复监督进程。应用仍固定 `9d1b04f`，未改应用代码。** 自动冻结备份→切换 API/library→458 份正式候选重处理/分批发布→恢复增量 worker。无需再次授权或用户回来触发。恢复优先读 operation 的 `production/supervisor-status.json`、`production/repair-status.json`；下面只跑样本后等待的安排已被覆盖。详情 [运行记录](RELEASE-REPAIR-20261006.md)。
 
 > **2026-10-06 用户已授权本次生产发布及正文修复，由 Codex 直接执行。服务器独立操作已启动；不要重新发开发任务或再次请求相同授权。** 固定应用源码 `9d1b04f`，操作 ID `release-9d1b04f-20261006`。首先读取[运行记录](RELEASE-REPAIR-20261006.md)与服务器 `operations/release-9d1b04f-20261006/{host-status,sample-status,repair-status}.json` 实际存在的文件；未完成样本验收前生产仍旧版。模型关闭、保留全部旧正文和人工内容。下方未授权状态为历史。

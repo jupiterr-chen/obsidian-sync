@@ -1,5 +1,20 @@
 # 生产发布及正文修复运行记录
 
+## 2026-10-07：Obsidian 保存 EPERM 已修复
+
+用户截图报错为 Markdown **保存失败**：`EPERM: operation not permitted, open`。不是 OCR 批次整体失败。本地复现同一文件只读打开成功、可写打开被拒绝；盘点 ResearchVault 的 2,049 个 Markdown 带 Windows ReadOnly 属性，两端 Syncthing 的 `research-vault` 均为 `ignorePerms=false`。服务器对应文件也缺写权限位。
+
+用户明确回复“修复把”后，执行了此项有限授权：
+
+- 备份两端私有 Syncthing 配置，经 REST PATCH **只改 `research-vault.ignorePerms=true`**；确认其他字段未变、无需重启。
+- 原生 PowerShell 按既定清单清除本地 2,049 个 Markdown 的 ReadOnly 位；未改正文、NTFS ACL、目录权限或服务器 chmod/chown，未移动/删除文件。
+- 逐文件校验 2,049/2,049 内容 SHA256 和 NTFS SDDL 未变；剩余只读 Markdown 为 0。原报错文件、开始阅读、研究区 README 均可用读写模式打开，验证未写入任何内容。
+- 最终两端同步均为 idle、needTotalItems=0、needBytes=0、pullErrors=0；正式 OCR 容器持续运行，已进入第 212/458 份，已发布批次仍为 200 份。
+
+本地恢复依据：`runtime/obsidian-readonly-20261007/plan.json`、`attributes-before-20261007T110717Z.json`、`attributes-result-20261007T110717Z.json`。Windows 配置备份在同目录 `windows-/20261007T110632Z/`；服务器配置备份在 `/vol2/1000/10.Develop/obsidian-sync/operations/readonly-fix-20261007/server-/20261007T110639Z/`。这些私有文件不提交，包含配置的备份不得打印或外发。后续部署保留两端此 folder 的 ignorePerms 设置，避免旧配置覆盖。
+
+本修复仅解决 Obsidian 保存权限。此前字形映射问题仍在独立 fix 清单；本次未修改应用源码、重启 OCR 或重新登记识别批次。
+
 ## 最新执行状态：正式自动批次已启动
 
 用户再次明确要求立即使用既有验收版本开始服务器重识别，新增错误另列 fix，不再扩大代码修改或等待用户回来。**应用源码仍为 `9d1b04f`，没有为新发现的问题修改应用代码。** 先前“样本结束停在人工检查点”的后续安排已被本段取代。
