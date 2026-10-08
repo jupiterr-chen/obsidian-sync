@@ -6,7 +6,11 @@
 
 本地真实试验共 8 次调用：6 页普通试验正常返回，两次密集表格细节试验触及输出上限。验收决定是**限定混合阅读 OCR**：普通页面使用 GLM，已发现问题的密集表格、输出不完整、空正文、乱码和限流/失败均回落既有本地 OCR；GLM 页面保留未知置信度与 review。不是全模型替代，也不是财务数字逐页人工验收。
 
-一次性接续脚本已完成。全回归 447 项，445 通过/2 跳过；随后增加备份分块校验测试，10 项操作测试在 Windows 与当前生产 Linux 镜像均通过。服务器真实连通性 canary 已通过（13.91 秒，21 个数字项与原生文本一致）。旧 OCR 已按准确容器 ID 停止；15.6 GB 一致性备份已写完，本检查点正在执行完整性校验，GLM 批次尚未启动。
+**服务器接续已启动：旧批次完成 249/458，剩余 209 份已冻结为新批次，GLM 页面并发 2。** 旧 OCR 已停止；library、knowledge API 和 Syncthing 保持健康。固定应用镜像仍是 `obsidian-sync:9d1b04f`，没有改常驻服务为模型模式。
+
+一次性接续脚本全回归 447 项，445 通过/2 跳过；随后增加备份分块校验测试，10 项操作测试在 Windows 与当前生产 Linux 镜像均通过。服务器真实连通性 canary 已通过（13.91 秒，21 个数字项与原生文本一致）。15.6 GB 一致性备份的完整性检查已通过，分块 SHA 校验已完成。
+
+启动容器 `obsidian-sync-glm-ocr-20261008`，ID `c5d94b821648756b923f0964e74d6d4263d5f5462cc18b5955b0f8310eb5aca8`；启动 Unix 时间 `1791425462.165656`。服务器独立 supervisor 已启动，退出本地 Codex/关机不会终止该批次。恢复时重新检查 `status.json` 和容器状态，不按本文初始计数假定当前进度。
 
 ## 第一轮真实证据
 
@@ -47,7 +51,7 @@
 
 ## 恢复位置与续跑规则
 
-- 交接校验补充：最初 helper 对备份使用整文件 `read_bytes()` 哈希，会一次分配约 15.6 GB；在执行到该步骤之前，已只对准确交接进程设置 2 GiB 地址空间上限，避免服务器内存耗尽。修订 helper 使用 1 MiB 分块读取，回归测试禁止无界读取。原完整性检查继续执行；旧代码在检查完成、冻结 manifest 后会在哈希步骤因内存限制停止，服务器独立 `resume-watcher.py` 只在准确旧进程退出且该 manifest 已存在时调用 `resume-after-backup-check`，重用备份与对账，不再次复制或停止其他服务。
+- 交接校验补充：最初 helper 对备份使用整文件 `read_bytes()` 哈希，会一次分配约 15.6 GB；在执行到该步骤之前，已只对准确交接进程设置 2 GiB 地址空间上限，避免服务器内存耗尽。修订 helper 使用 1 MiB 分块读取，回归测试禁止无界读取。原完整性检查已通过；旧代码在冻结 manifest 后如预期因内存限制停止，独立 `resume-watcher.py` 核对准确旧进程已退出后调用 `resume-after-backup-check`，成功重用备份与对账并启动新容器，没有再次复制或停止其他服务。修订代码已提交 `864ef3a`；runner 仍为 `9b6686a` 中的固定 SHA，没有改变已冻结 OCR recipe。
 - `resume-after-backup-check` 只适用于上述“完整性校验/manifest 已完成、尚未 launch”的检查点，并核对审批、脚本 SHA、原清单 SHA、458 总数及写者状态；不能用于启动第二个写者。`launch.json` 已存在时应查现有容器。
 
 - 本地私有目录：`runtime/glm-ocr-pilot-20261008/`。
@@ -56,4 +60,5 @@
 - 服务器原批次：`operations/release-9d1b04f-20261006/production/`；停止前检查已提取 249/458。接续的准确保留数与剩余数以冻结 `manifest.json` 为准（覆盖 SQLite 提交早于旧 results 的窗口）。旧 supervisor 可能因本次有意停止记录 exit 137；不因此盲目重启旧 OCR，查看本次 operation。
 - 服务器目录：`operations/glm-ocr-20261008/`，`manifest.json`/`recipe.json` 冻结范围，`status.json` 是新实时状态；`launch.json`/`handoff-status.json` 标识交接，`supervisor-status.json` 记录批次结束处理。
 - `backup/knowledge.sqlite3` 为交接前一致性备份，`backup.json` 为 SHA 和清单。恢复时先保护新写入，不把备份直接覆盖生产库；旧容器不应盲目重启，否则原脚本会重新遍历原清单。
+- 备份实测字节数 `15,629,672,448`，SHA-256 `1d83aee19dee33fdceafe9ce0fb2b444dd18b3afb7963443133da484b6ba56b2`。检查和哈希期间无知识库写者；原 221,436 个历史 block 的哈希另存 `evidence-before.json`，批次结束再核对。
 - 页面缓存和原始模型返回保存在私有 `pages/`，凭据以新建仅属主可读文件保存，不在命令行、日志、Git 或本文中暴露。
