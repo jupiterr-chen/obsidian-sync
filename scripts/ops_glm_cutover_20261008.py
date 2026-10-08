@@ -22,7 +22,11 @@ NEW_NAME = 'obsidian-sync-glm-ocr-20261008'
 
 
 def digest(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    value = hashlib.sha256()
+    with Path(path).open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            value.update(chunk)
+    return value.hexdigest()
 
 
 def save(name, obj):
@@ -124,6 +128,42 @@ def handoff():
         save('backup.json', {'knowledge_db': str(backup / 'knowledge.sqlite3'),
                              'sha256': digest(backup / 'knowledge.sqlite3'),
                              'previously_completed': len(completed), 'remaining': len(remaining)})
+    launch(len(completed), len(remaining))
+
+
+def resume_after_backup_check():
+    """Recover only the verified post-manifest, pre-launch checksum failure."""
+    assert not (OP / 'launch.json').exists(), 'already launched'
+    assert (OP / 'handoff-started.json').is_file()
+    assert (OP / 'old-job-reconciliation.json').is_file()
+    assert (OP / 'backup/reading-meta').is_dir()
+    assert inspect(OLD_NAME)['Id'] == OLD_ID
+    assert not inspect(OLD_NAME)['State']['Running']
+    assert not inspect('obsidian-sync-knowledge-worker')['State']['Running']
+    acceptance = json.loads((OP / 'acceptance.json').read_text())
+    assert acceptance['user_payload_approval'] is True
+    assert acceptance['decision'] == 'hybrid_reading_ocr'
+    assert acceptance['cutover_sha256'] == digest(Path(__file__))
+    manifest = json.loads((OP / 'manifest.json').read_text())
+    assert manifest['runner_sha256'] == acceptance['runner_sha256'] == digest(OP / 'scripts/ops_glm_ocr_repair_20261008.py')
+    assert manifest['original_manifest_sha256'] == digest(OLD / 'repair-members.json')
+    assert manifest['previously_completed'] + len(manifest['items']) == 458
+    backup = OP / 'backup/knowledge.sqlite3'
+    assert backup.is_file() and backup.stat().st_size > 0
+    # The original handoff creates manifest only after full integrity_check
+    # and the exact old-job reconciliation commit. Never recreate that state.
+    with (ROOT / 'state/knowledge.lock').open('a+') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        save('handoff-status.json', {'stage': 'streaming_backup_checksum', 'updated_at': time.time()})
+        save('backup.json', {'knowledge_db': str(backup), 'sha256': digest(backup),
+             'previously_completed': manifest['previously_completed'],
+             'remaining': len(manifest['items']), 'integrity_check': 'ok_before_manifest',
+             'checksum_recovery': 'streaming; original backup and reconciliation retained'})
+    launch(manifest['previously_completed'], len(manifest['items']))
+
+
+def launch(completed, remaining):
+    assert not (OP / 'launch.json').exists()
     cmd = ['docker', 'run', '-d', '--name', NEW_NAME, '--network', 'bridge', '--cpus', '1.5',
            '--memory', '2g', '--restart', 'no', '--workdir', '/',
            '-e', 'PYTHONPATH=/app', '-e', 'PYTHONUNBUFFERED=1',
@@ -145,10 +185,10 @@ def handoff():
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'supervise'],
                     stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     save('handoff-status.json', {'stage': 'glm_continuation_started', 'container': container,
-          'supervisor_pid': child.pid, 'previously_completed': len(completed),
-          'remaining': len(remaining), 'updated_at': time.time()})
-    print(json.dumps({'stage': 'started', 'previously_completed': len(completed),
-                      'remaining': len(remaining), 'container': container, 'supervisor_pid': child.pid}), flush=True)
+          'supervisor_pid': child.pid, 'previously_completed': completed,
+          'remaining': remaining, 'updated_at': time.time()})
+    print(json.dumps({'stage': 'started', 'previously_completed': completed,
+                      'remaining': remaining, 'container': container, 'supervisor_pid': child.pid}), flush=True)
 
 
 def supervise():
@@ -169,11 +209,13 @@ def supervise():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('mode', choices=['preflight', 'handoff', 'supervise'])
+    parser.add_argument('mode', choices=['preflight', 'handoff', 'supervise', 'resume-after-backup-check'])
     mode = parser.parse_args().mode
     if mode == 'preflight':
         preflight()
     elif mode == 'handoff':
         handoff()
+    elif mode == 'resume-after-backup-check':
+        resume_after_backup_check()
     else:
         supervise()

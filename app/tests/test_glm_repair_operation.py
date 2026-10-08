@@ -1,5 +1,7 @@
 """No real calls: test the bounded one-off GLM repair's operational safeguards."""
 from concurrent.futures import ThreadPoolExecutor
+import ast
+import hashlib
 import importlib.util
 from io import BytesIO
 import json
@@ -17,6 +19,23 @@ spec.loader.exec_module(op)
 
 
 class GlmOperationTests(unittest.TestCase):
+    def test_backup_digest_streams_bounded_reads(self):
+        path = PATH.with_name('ops_glm_cutover_20261008.py')
+        tree = ast.parse(path.read_text(encoding='utf-8'))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'digest')
+        namespace = {'hashlib': hashlib, 'Path': mock.Mock()}
+        content = b'a' * (2 * 1024 * 1024 + 71)
+        class BoundedReader(BytesIO):
+            def read(self, size=-1):
+                self_test.assertGreater(size, 0)
+                self_test.assertLessEqual(size, 1024 * 1024)
+                return super().read(size)
+        self_test = self
+        namespace['Path'].return_value.open.return_value = BoundedReader(content)
+        namespace['Path'].return_value.read_bytes.side_effect = AssertionError('unbounded backup read')
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(path), 'exec'), namespace)
+        self.assertEqual(namespace['digest']('backup.sqlite3'), hashlib.sha256(content).hexdigest())
+
     def test_known_dense_table_and_plain_numeric_matrix_rejected(self):
         self.assertEqual(op.reject_output('|' + '|'.join(['x'] * 10) + '|', 'end_turn'), 'dense_table')
         self.assertEqual(op.reject_output(' '.join(str(i) for i in range(250)), 'end_turn'), 'dense_table')
