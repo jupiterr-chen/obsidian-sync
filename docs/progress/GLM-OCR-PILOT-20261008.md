@@ -12,6 +12,8 @@
 
 启动容器 `obsidian-sync-glm-ocr-20261008`，ID `c5d94b821648756b923f0964e74d6d4263d5f5462cc18b5955b0f8310eb5aca8`；启动 Unix 时间 `1791425462.165656`。服务器独立 supervisor 已启动，退出本地 Codex/关机不会终止该批次。恢复时重新检查 `status.json` 和容器状态，不按本文初始计数假定当前进度。
 
+上线实查：第一份剩余文档需要 OCR 9 页；前 5 页已正常返回，13.06–24.06 秒/页，无回落原因。两份首请求 dispatch 时间仅相差约 0.0005 秒，且返回时间区间重叠，确认实际为两路并发。此处是启动检查点，不代表 209 份已完成，也不外推整批完成时间。
+
 ## 第一轮真实证据
 
 - 现有提供者：bigmodel-coding-plan；模型请求与响应均为 GLM-5.3-Flash。
@@ -59,6 +61,7 @@
 - `next-test-plan.json`：四页图片 SHA、尺寸、模型、端点、调用上限；四页已获明确批准并实际完成，恢复以 dispatch/result 文件为准。
 - 服务器原批次：`operations/release-9d1b04f-20261006/production/`；停止前检查已提取 249/458。接续的准确保留数与剩余数以冻结 `manifest.json` 为准（覆盖 SQLite 提交早于旧 results 的窗口）。旧 supervisor 可能因本次有意停止记录 exit 137；不因此盲目重启旧 OCR，查看本次 operation。
 - 服务器目录：`operations/glm-ocr-20261008/`，`manifest.json`/`recipe.json` 冻结范围，`status.json` 是新实时状态；`launch.json`/`handoff-status.json` 标识交接，`supervisor-status.json` 记录批次结束处理。
+- `status.json` 在文档/阶段边界刷新。处于 `recognizing_pages` 时，页面调用会继续推进，`model_requests`/`remote_pages` 可能仍是上一检查点值；应同时统计 `pages/*.dispatch.json` 和已完成结果的元数据，不能把暂时的 0 误报成未调用。只输出计数、耗时、fallback、usage，不打印私有正文或整个结果 JSON。
 - `backup/knowledge.sqlite3` 为交接前一致性备份，`backup.json` 为 SHA 和清单。恢复时先保护新写入，不把备份直接覆盖生产库；旧容器不应盲目重启，否则原脚本会重新遍历原清单。
 - 备份实测字节数 `15,629,672,448`，SHA-256 `1d83aee19dee33fdceafe9ce0fb2b444dd18b3afb7963443133da484b6ba56b2`。检查和哈希期间无知识库写者；原 221,436 个历史 block 的哈希另存 `evidence-before.json`，批次结束再核对。
 - 页面缓存和原始模型返回保存在私有 `pages/`，凭据以新建仅属主可读文件保存，不在命令行、日志、Git 或本文中暴露。
