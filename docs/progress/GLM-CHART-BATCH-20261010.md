@@ -1,5 +1,23 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 后续恢复：v3 普通超时留档策略已验收，服务器 732 项重新接续
+
+**18:02:01 真实启动核验：** `sequence-status=batch_running/batch-002`，容器 `glm-chart-v3-002-20261010` / `3b0621cd8c7c2b157956ea5efbbe481c1d997fc7220287fa4afc222a2c2d8675` 在 18:01:49 启动。入口 policy marker 已生成，3 workers，所有 state/source/batch/secret 挂载只读，operation 可写；正在来源预检/渲染，dispatch 0、返回 0，不能将容器运行等同模型已返回。监督器进程命令身份已核验仍活跃；元数据见 v3 `handoff-snapshot.json`。
+
+Luna 新增独立 operation 工具，旧工具与历史产物全部保留；Codex 复跑真实 `GLMChartRunner` fake transport 与实际 `execute_batches` fake Docker 测试，验证普通 TimeoutError 后继续、401/403/429/错模型仍熔断、200 记录合并计数与 proposal-only、8 批顺序执行。生产应用源码/镜像不变，适配仅本次分类操作层，不进行任何失败请求重试。
+
+固定私有工具：`chart_continue_v3.py` SHA256 `f975f7e79071c5d7629ce069653e6aa46647937132f60a7138f9092cb8b3bb06`；`timeout_entry.py` SHA256 `7d8bd3761694b150cdeea25acc0a3d605e90aec831040c3fc9c056b5ee8abaa4`。普通超时通过线程局部标记精确识别，原 `_request` 仍写入 unknown 结果；其它运输错误、认证/限流、错模型继续全局停止。已配对 HTTP 400、格式/截断同样作为候选异常保留。不会清除旧 circuit 或修改旧请求记录。
+
+真实 plan-only 零模型调用通过后，Codex 独立核对：旧批 200 请求/100 项/90 项两轮 valid 均保留，8 批 732 项与原冻结清单逐对象一致、不重不漏且不含旧 100 项。新计划 SHA256 `92c888bebbb0aea4d5eb426aba7771dc676247f8ec7adbefc638839874bdfde1`。旧 49 失败路径没有 results.json，v3 直接核对 49 对持久 dispatch/result，不伪造旧 summary。
+
+服务器新恢复入口为 `operations/glm-chart-batch-20261010/remaining/continuation-v3/`，监督器已脱离 SSH 启动，`supervisor-launch.json` 记录真实身份（PID 4156908 只作启动线索）；先查看 `sequence-status.json`、各批 `remaining/batch-00N/{launch,batch-result}.json`、`supervisor.log`。完成为 `sequence-result.json`/`complete.json`，全局异常为 `stopped.json`。固定入口副本与 hash 写入计划，后续各批使用该副本，3 并发/单 runner/生产只读，无 Vault 挂载。不重启旧 49 容器、旧后续监督器或原 sequence。定时 Codex heartbeat 仍暂停，阶段验收尚未结束，不宣称 B3/全库治理完成。
+
+## 17:51 实查：49 次续接已全部发送，普通超时导致后续队列停止
+
+续接容器在 16:44:15 退出 1。49 个 dispatch 全有持久记录：46 valid、1 格式错误、1 截断、1 unknown_dispatch（TimeoutError，180.213 秒）；没有未配对 dispatch。该 unknown 仅表示服务端结果未知，不能算作成功返回。与原 151 记录独立去重后，恰好 200 个请求、100 个候选、90 项两轮 valid：合计 188 valid、2 HTTP 400、5 格式错误、3 截断、2 TimeoutError unknown。端点和模型均与固定授权一致。所有旧请求不重发。
+
+原 49 续接器将新 unknown 作为全局停止条件，导致后续监督器退出 GateError；732 项尚未启动。生产服务健康。该行为过于严格，不符合用户要求由固定脚本处理常规异常、避免每个普通超时都触发主会话返工的分工。正在由 Luna 编制仅 operation 使用的 v3 衔接：将已持久保存的普通 TimeoutError、HTTP 400、格式/截断保留为候选异常后继续其它项，仍禁止重发未知请求；认证/限流、错模型、来源变动、无配对 dispatch 等仍全局停止。固定分类应用及全部历史记录保留，生产 DB/Vault 不改。v3 独立验收与启动前，不得将其称为已恢复。
+
 ## 最新检查点：16:32 续接有实际返回，后 8 批监督器已脱离 SSH
 
 16:32:32 实查：49 请求续接已 dispatch 23、返回 20（均 valid）、3 在途；容器 running。普通 worker 运行，library/knowledge API/Syncthing healthy。尚未完成这 49 请求，不外推为真实图表质量通过。

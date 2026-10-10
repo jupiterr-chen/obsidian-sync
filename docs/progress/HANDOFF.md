@@ -1,5 +1,11 @@
 # 会话检查点 / HANDOFF
 
+> **18:02:01 已实查 v3 第 2 批启动：** `sequence-status=batch_running/batch-002`，容器 `glm-chart-v3-002-20261010` / `3b0621cd…`，3 workers，policy marker 存在，生产只读挂载正确；dispatch/返回仍 0（预检渲染阶段）。监督器活跃。下一次进度只读 `remaining/continuation-v3/sequence-status.json`、当前批 cache 与 result，勿启动新开发或重复全量验收。
+
+> **2026-10-10 当前恢复入口已切至 v3。** 17:51 查明旧 49 已全发，但普通超时使旧后续队列停止；原 200 请求已零调用合并为 100 项/90 双 valid。Luna 操作层普通超时留档适配经 Codex 集中验收，剩余 8 批 732 项已提交服务器独立启动。新目录 `operations/glm-chart-batch-20261010/remaining/continuation-v3/`；只读 supervisor-launch/sequence-status/各批 cache/result 判断实际进度，不沿用旧 follow-on 状态或重复 execute。计划 SHA `92c888be…`，3 并发，未知不重发；普通 TimeoutError/HTTP400/schema/truncated 留异常后继续，认证/429/错模型/源变化等仍停止。工具 hash 与真实预检见[执行记录](GLM-CHART-BATCH-20261010.md)首节。生产服务/DB/Vault不改，Codex半小时唤醒保持暂停。
+
+> **2026-10-10 17:51 最新：49 请求全部已发，但 16:44 因新一次 TimeoutError 停止；732 项未启动。** 49 记录=46 valid/1 schema/1 truncated/1 unknown；与原 151 合并恰 200 请求、100 项、90 项双 valid，旧请求一律不重发。后续监督器已 GateError 退出，不能沿用 16:32 “等待中”状态。Luna 正准备仅 operation 的 v3，使普通超时等已记录例外不再阻断无关项；仍保留 auth/429/错模型/源变化/未配对 dispatch 的停止条件。尚未完成 v3 验收/启动。见[执行记录](GLM-CHART-BATCH-20261010.md)首节；定时 Codex 唤醒仍暂停，生产健康。
+
 > **2026-10-10 16:32 当前恢复入口：服务器续跑及后 8 批衔接均已启动。** 49 未发送请求续接实际 dispatch 23 / valid 返回 20 / 在途 3；`follow-on-supervisor-launch.json` 对应进程身份已核实，等待精确续接容器成功并完成对账后自动跑 002–009 共 732 项，3 并发。续批输出 `remaining/batch-001/continuation/follow-on/`；先读 status/result/停止记录，勿重跑 execute 或原 sequence。工具 SHA/门禁/检查点见[执行记录](GLM-CHART-BATCH-20261010.md)首节。生产服务健康，DB/Vault 只读，不 activate。半小时主模型 heartbeat 已暂停并缩短恢复提示；以后只做阶段验收，不恢复高频读取历史。用户 docs37 未动。以下为历史记录。
 
 > **2026-10-10 16:22：49 个未发送请求已在服务器续接。** 容器 `glm-chart-unissued-20261010` / `f1786fcd…`，源码工具 SHA `134df734…`，计划 SHA `a913a9ab…`，3 并发、旧 151 请求全部排除。完整 driver 离线 fake + 服务器逐对象差集验收通过。真实状态入口 `operations/glm-chart-batch-20261010/remaining/batch-001/continuation/`；16:22:49 running/尚在预检，dispatch 0。先查 started/status/results/cache，勿重跑 execute。后 8 批 732 项的服务器自动衔接尚在准备；生产只读、旧 9 异常保留、不激活投影。半小时 Codex heartbeat 保持暂停，按新分工只做阶段验收。详见[执行记录](GLM-CHART-BATCH-20261010.md)。
