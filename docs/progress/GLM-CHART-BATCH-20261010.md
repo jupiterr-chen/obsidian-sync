@@ -26,3 +26,11 @@
 Luna 负责新的 `chart_batch.py`、独立 CLI 和 fake transport 测试。Codex 负责独立反例、固定源码、30 页真实结果和原图复核。独立 6 项已验证：旧正文 hash、过期版本、已有 head 拦截；调用前外发门禁；完整 run 的只读连接与重启缓存；并发重复页仅发一次物理请求。源码审查还核对固定 endpoint/model、禁代理和重定向、两轮输入独立、JSON 坐标校验、无 activate/生产写入。当前尚无本批真实分类质量结论，不以离线通过替代视觉验收。
 
 后续仍需原生字符精确映射、OCR 区域定位例外处理、确认投影、按批索引/发布与 Windows 验证。既有小批的 8 页/26 图像已上线，不代表 862 候选全部治理完成；真实表格和正文必须保留。保护 docs/37 用户修改和所有源证据。
+
+## 14:07 首批回复与格式诊断
+
+14:06:29 只读快照：已 dispatch 15 次，收到 11 个回复，其中 2 个通过结构校验、9 个 `invalid_json_or_schema`；4 个仍在途，无 HTTP 错误或熔断。这是模型输出结构问题的信号，尚不能判断真实图表识别质量；原文及生产数据没有改变。
+
+当前 runner 对格式失败只保存输出 hash，无法从旧失败记录恢复原始回复。已安排一个独立诊断：`supervise_diagnostic.py` 等准确试点容器退出 0 后，仅选同一 30 项中一条已知格式失败请求，额外调用一次并将原始回复保存在私有 `diagnostic-one/raw-response.json`，对外只输出格式/校验元数据。它与原 4 路试点串行，不重试未知 dispatch，不重启现有容器。恢复先看 `diagnostic-supervisor-launch.json`、`diagnostic-supervisor-status.json`、`diagnostic-launch.json`、`diagnostic-one/diagnosis.json`；禁止盲目重新排队。
+
+需先根据真实诊断定位包装/schema问题，再决定有界兼容和已知失败项续跑；成功回复与旧证据保留。剩余 832 项尚未启动，不能因用户额度充足就跳过试点质量验收。

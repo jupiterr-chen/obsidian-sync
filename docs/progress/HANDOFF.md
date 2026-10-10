@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 14:07：图表试点首批回复存在格式校验失败，正在有界诊断。** 14:06 已 dispatch 15，返回 11（2 valid、9 invalid_json_or_schema），无 HTTP/熔断；原 4 路继续。服务器已排队 `supervise_diagnostic.py`，只在准确 pilot 容器退出后对 1 个同范围已知失败做诊断，原始回复仅私有保存，不超过全局 4 并发。先读 diagnostic-supervisor/diagnostic 检查点；不要重复启动或重发未知请求。真实质量未验收，剩余 832 尚未启动。详见[执行记录](GLM-CHART-BATCH-20261010.md)；现有 heartbeat 已包含本恢复分支，生产不改。
+
 > **2026-10-10 14:03：GLM 图表 30 项真实试点已在服务器启动。** B1/B2 工具固定 `34edf46` 已推送，离线 5 项与 Codex 独立 6 项通过；禁网冻结核对 862/862 有效、跳过 0，30 试点来自 30 份文档，三来源各 10，含图片。新 operation `operations/glm-chart-batch-20261010`，先读 `pilot-launch.json`/实际容器与 `pilot-run/cache`、proposals；4 路、两轮、最多 60 请求，已 dispatch 无结果不重发。生产数据/服务不改，结果仅 proposal。现有 heartbeat 已改“GLM图表批处理与验收”继续半小时跟进，真实质量/后续批量与 B3 映射发布尚未完成。[执行记录](GLM-CHART-BATCH-20261010.md)含准确恢复路径；不得重启旧发布/OCR。下方为历史准备状态。
 
 > **2026-10-10 13:56：用户确认现有 GLM 批量治理剩余候选，额度不作为约束；先 30 页双轮试点。** [任务书](../43-glm-chart-batch-taskbook.md)、[新执行记录](GLM-CHART-BATCH-20261010.md)。Luna 正在限定新文件中实现 B1/B2，Codex 负责独立验收及真实运行。服务器新 operation `operations/glm-chart-batch-20261010` 已建立，目前仅 preparation/audit 输入，尚无本批真实调用；生产仍 `6679872`，不重跑已完成发布或旧 OCR。862 候选冻结时须复核有效版本/hash/head，结果仅 proposal；原文/表格、docs/37 与凭据边界继续保护。下方为已完成小批及历史状态。
