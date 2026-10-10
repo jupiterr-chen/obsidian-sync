@@ -13,7 +13,7 @@
 - 新源码及 compose：`/vol2/1000/10.Develop/obsidian-sync/releases/6679872/`。
 - 旧 compose：`/vol2/1000/10.Develop/obsidian-sync/releases/9d1b04f/deploy/production-compose.json`。
 
-`prepare-status.json` / `isolated-result.json` / `supervisor-status.json` / `cutover-status.json` / `production-result.json` 是阶段入口。不要重新执行已启动的 prepare/supervise/cutover，也不要根据旧 PID 停进程。容器身份重新 inspect，源码与脚本 hash 绑定在私有检查点。
+当前续接入口为 `attempt-v2-launch.json` / `rebind-v2-result.json` / `isolated-result-v2.json` / `supervisor-v2-status.json` / `cutover-status.json` / `production-result.json`。首轮 `prepare-status.json` / `isolated-result.json` / `supervisor-status.json` 保留为历史证据，不能把首轮失败误当成 v2 最新状态。不要重新执行 prepare 或重复启动监督器，也不要根据旧 PID 停进程。容器身份重新 inspect，源码与脚本 hash 绑定在私有检查点。
 
 ## 执行检查点
 
@@ -25,7 +25,7 @@
 
 ## 回退方式
 
-优先回退派生指针，保留新文件、原文和人工修改。`recover.py` 只处理本次 8 个 block，要求当前投影仍等于本次预期，否则停止；随后使用已验收的索引重建及阅读发布器恢复入口。运行前重新冻结准确写者，使用新镜像、禁网、精确挂载 state/vault/operation。脚本不会自动执行。
+优先回退派生指针，保留新文件、原文和人工修改。当前版本为 `recover-v2.py`，使用 `manifests-v2/`，只处理本次 8 个 block，要求当前投影仍等于本次预期，否则停止；随后使用已验收的索引重建及阅读发布器恢复入口。运行前重新冻结准确写者，使用新镜像、禁网、精确挂载 state/vault/operation。脚本不会自动执行。首轮 `recover.py` 与 `manifests/` 仅留档，不用于本次 v2 的回退。
 
 冻结副本在 `frozen-backup/`，预备副本在 `backup/`，隔离恢复在 `isolated/`；各自有 hash/清单。若需要数据库级恢复，先保护切换后新增数据并单独对账，不能把旧 DB 直接覆盖当前 DB。旧镜像和旧 compose 保留；停止的历史 research-kb / GLM OCR 容器不重启。
 
@@ -50,3 +50,13 @@
 服务器的准备/发布监督进程独立于 SSH 和本机。会话自动跟进与 Windows 验收需要本机和 Codex 应用可用，关机期间服务器流程继续，后续回来读取检查点续验；参见 [官方计划任务说明](https://learn.chatgpt.com/docs/automations?surface=app)。
 
 另列后置运维项：评估历史索引世代保留与备份时长。这里只记录事实，不清理索引、不 VACUUM、不因此改变本次发布源码或重新开启开发返工。
+
+## 11:20 换行差异定位与第二次隔离验收
+
+完整备份及恢复 hash 已通过。10:45 首轮隔离预检因 `stale block text` 退出，监督器正确停止，没有冻结生产写者或执行切换。11:12 后续检查发现本地样本曾由 Windows `write_text` 导出，再由 `read_text` 读取：原 CRLF 被扩成 CRCRLF，读取后成为两个 LF。8 页中 5 页因此清单 hash 不等于生产原始字节。此前“绑定生产 hash”的表述不够准确；身份和 PDF hash 正确，但没有在发布准备前复核数据库原始文本字节。这是本次清单准备遗漏，不是生产正文改变，也不需要重跑 OCR 或修改应用代码。
+
+续验先将生产、备份、隔离副本的 8 页逐一只读比较，三者完全一致。再证明全部差异仅是原 CR 位置变成 LF、字符总数及所有其他位置不变；41 个已审查区间的原哈希全部匹配导出变换。用原始字节重算正文及区间哈希，范围下标、区域、图题、26 图像和 keep/exclude 意图不变，三份数据库的 `validate_manifest` 全部通过。新的 `manifests-v2/` 和 `rebind-v2-result.json` 保留完整元数据；原清单和失败结果不覆盖。未修改任何数据库原文。
+
+11:19 服务器启动第二次禁网隔离容器 `obsidian-sync-chart-check-6679872-20261010-v2`，身份记录于 `attempt-v2-launch.json`；`check-v2.py` 已通过 8 页预检，正在构建隔离基线索引。11:20 实测 CPU 约 102%、内存 1.82 GiB、容器磁盘读 1.21 GB，属于实际计算阶段。此时生产 library/API 健康均为 HTTP 200，仍未切换。
+
+`supervise-v2.py` 已脱离 SSH 运行，只有第二次隔离的激活/发布三连跑、原始证据保留及回退全部通过且容器退出 0、普通 worker 空闲时，才执行 `cutover-v2.py`。发布镜像仍是独立验收的 `6679872`，没有应用源码修改或模型调用。只读后验工具和 Windows 验证继续使用原 `postcheck.py`、`audit.py`、`windows-verify.py`；生产结果文件名不变。若监督器超时，先核查新容器实际活动和检查点，不重做已完成的备份或初始部署。
