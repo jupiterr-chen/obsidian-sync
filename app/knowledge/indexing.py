@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .store import KnowledgeStore
+from .content import consumer_blocks, digest
 
 ASCII_TERM_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._%+-]*")
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]+")
@@ -103,8 +104,7 @@ def _selected_blocks(kb: KnowledgeStore) -> List[Any]:
             extraction_ids).fetchall()
     from .quality import block_evidence_usable
 
-    return [row for row in rows
-            if block_evidence_usable(row["text"] or "")[0]]
+    return consumer_blocks(kb, rows)
 
 
 def allowed_block_ids(kb: KnowledgeStore,
@@ -134,7 +134,8 @@ def allowed_block_ids(kb: KnowledgeStore,
            " AND " + clause + version_where)
     with kb._lock:
         rows = kb._conn.execute(sql, params).fetchall()
-    return [row["block_id"] for row in rows]
+    effective = {b["block_id"] for b in _selected_blocks(kb)}
+    return [row["block_id"] for row in rows if row["block_id"] in effective]
 
 
 def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
@@ -147,7 +148,7 @@ def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
     successor. No-op when the active manifest already matches.
     """
     rows = _selected_blocks(kb)
-    manifest_source = "\n".join("%s:%s" % (r["block_id"], r["extraction_id"])
+    manifest_source = "\n".join("%s:%s:%s" % (r["block_id"], r["extraction_id"], digest(r["text"]))
                                 for r in rows)
     manifest_hash = hashlib.sha256(
         (SELECTION_POLICY + "\x00" + manifest_source).encode("utf-8")).hexdigest()
@@ -297,10 +298,16 @@ def search(kb: KnowledgeStore, query: str, filters: Optional[SearchFilters] = No
     for block_id in candidates:
         if len(hits) >= limit:
             break
-        blocks = kb.blocks_by_ids([block_id])
+        blocks = consumer_blocks(kb, kb.blocks_by_ids([block_id]))
         if not blocks:
             continue
         block = blocks[0]
+        # Even before the next generation is published, retired axis terms
+        # cannot recall this block as matching factual evidence.
+        current_terms = set(tokenize(block["text"]))
+        matched[block_id] = [t for t in matched.get(block_id, []) if t in current_terms]
+        if not matched[block_id]:
+            continue
         with kb._lock:
             doc = kb._conn.execute(
                 "SELECT source, doc_id, symbol, doc_type, report_date, published_at,"

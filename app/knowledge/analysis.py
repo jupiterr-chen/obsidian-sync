@@ -106,21 +106,28 @@ def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
     return num / (da * db)
 
 
+def content_embedding_key(embedder, block):
+    key = embedding_cache_key(embedder)
+    return key + ":" + block["projection_id"] if block.get("projection_id") else key
+
+
 def ensure_block_embeddings(kb: KnowledgeStore, embedder: EmbeddingProvider,
                             block_ids: Sequence[str],
                             ledger: Optional[BudgetLedger] = None) -> int:
     """Embed missing blocks (cache keyed by model). Returns newly embedded."""
     dims = getattr(embedder, "dimensions", 0) or None
-    cache_key = embedding_cache_key(embedder)
-    missing = [bid for bid in block_ids
-               if kb.get_embedding(cache_key, bid, dimensions=dims) is None]
-    if not missing:
+    from .content import consumer_blocks
+    blocks = consumer_blocks(kb, kb.blocks_by_ids(block_ids))
+    blocks = [b for b in blocks if kb.get_embedding(content_embedding_key(embedder, b), b["block_id"], dimensions=dims) is None]
+    if not blocks:
         return 0
-    blocks = kb.blocks_by_ids(missing)
     vectors, usage = budgeted_embed(embedder, [b["text"] for b in blocks],
                                     ledger=ledger, kb=kb)
-    kb.put_embeddings(cache_key,
-                      {b["block_id"]: v for b, v in zip(blocks, vectors)})
+    grouped = {}
+    for block, vector in zip(blocks, vectors):
+        grouped.setdefault(content_embedding_key(embedder, block), {})[block["block_id"]] = vector
+    for cache_key, vectors_by_id in grouped.items():
+        kb.put_embeddings(cache_key, vectors_by_id)
     return len(blocks)
 
 
@@ -157,10 +164,14 @@ def hybrid_search(kb: KnowledgeStore, query: str,
     ensure_block_embeddings(kb, embedder, allowed, ledger=ledger)
     vectors, _q_usage = budgeted_embed(embedder, [query], ledger=ledger, kb=kb)
     query_vec = vectors[0]
-    cache_key = embedding_cache_key(embedder)
+    from .content import consumer_blocks
+    projected = {b["block_id"]: b for b in consumer_blocks(kb, kb.blocks_by_ids(allowed))}
     dims = getattr(embedder, "dimensions", 0) or None
     scored = []
     for block_id in allowed:
+        if block_id not in projected:
+            continue
+        cache_key = content_embedding_key(embedder, projected[block_id])
         vector = kb.get_embedding(cache_key, block_id, dimensions=dims)
         if vector:
             scored.append((block_id, _cosine(query_vec, vector)))
@@ -173,7 +184,7 @@ def hybrid_search(kb: KnowledgeStore, query: str,
     for rank, bid in enumerate(vector_rank):
         fused[bid] = fused.get(bid, 0.0) + 1.0 / (RRF_K + rank + 1)
     ordered = sorted(fused, key=lambda bid: -fused[bid])[:limit]
-    blocks = {b["block_id"]: b for b in kb.blocks_by_ids(ordered)}
+    blocks = {b["block_id"]: b for b in consumer_blocks(kb, kb.blocks_by_ids(ordered))}
     hits = []
     for bid in ordered:
         block = blocks.get(bid)
@@ -218,13 +229,14 @@ def verify_citations(draft: str, cited_indexes: Sequence[int],
     """A17: every citation must resolve to a retrieved, accessible block."""
     valid = []
     invalid = []
+    from .content import evidence_url
     for idx in cited_indexes:
         if 1 <= idx <= len(blocks):
             block = blocks[idx - 1]
             valid.append({"n": idx, "block_id": block["block_id"],
+                          "projection_id": block.get("projection_id"),
                           "source": block["source"], "doc_id": block["doc_id"],
-                          "evidence_url": "/api/kb/v1/evidence/%s"
-                                          % block["block_id"]})
+                          "evidence_url": evidence_url(block)})
         else:
             invalid.append({"n": idx, "reason": "index_out_of_range"})
     return {"valid": valid, "invalid": invalid,
@@ -249,6 +261,9 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
     run = kb.get_analysis_run(run_id)
     if run is None:
         raise ValueError("run %r not found" % run_id)
+    from .content import consumer_blocks, is_stale
+    if is_stale(kb._conn, "analysis", run_id):
+        return {"run_id": run_id, "status": "stale", "error": "content_changed_create_new_run"}
     if run["status"] == "done":
         return {"run_id": run_id, "status": "done", "idempotent": True}
 
@@ -261,6 +276,9 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
         hits = retriever(query, top_k)
         blocks = [hit["block"] if isinstance(hit, dict) and "block" in hit
                   else hit.block for hit in hits]
+        blocks = consumer_blocks(kb, blocks)
+        if not blocks:
+            raise ValueError("no_usable_evidence")
         prompt = build_analysis_prompt(query, blocks)
         estimated_input = estimate_tokens(prompt)
         if estimated_input > budget.max_input_tokens_per_run:
@@ -297,6 +315,11 @@ def execute_analysis_run(kb: KnowledgeStore, run_id: str, query: str,
             ledger.fail_unknown(reservation, run_id=run_id)
             raise
         ledger.settle(reservation, usage, run_id=run_id)
+        from .content import context_current
+        if not context_current(kb, blocks):
+            kb.update_analysis_run(run_id, status="stale", draft=draft,
+                                   error="content_changed_during_run")
+            return {"run_id": run_id, "status": "stale", "error": "content_changed_during_run"}
         cited = sorted({int(m) for m in CITATION_RE.findall(draft)})
         verification = verify_citations(draft, cited, blocks)
         kb.update_analysis_run(

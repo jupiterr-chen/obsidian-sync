@@ -286,6 +286,7 @@ def claim_pending_analysis_tasks(kb: KnowledgeStore, limit: int = 5,
                " JOIN kb_documents d ON d.source=t.source"
                " AND d.doc_id=t.doc_id"
                " WHERE t.status IN (?,?)"
+               " AND NOT EXISTS (SELECT 1 FROM content_invalidations ci WHERE ci.kind='analysis' AND ci.object_id=t.run_id)"
                " AND (t.lease_until IS NULL OR t.lease_until < ?)")
         params: List[Any] = [STATUS_PENDING, STATUS_PARTIAL, utc_now()]
         if model_identity is not None:
@@ -348,7 +349,8 @@ def _own_blocks_retriever(kb: KnowledgeStore, source: str, doc_id: str,
     def retriever(query, top_k):
         limit = min(max_blocks, int(top_k) if top_k else max_blocks)
         hits = []
-        for block in kb.get_blocks(extraction_id):
+        from .content import consumer_blocks
+        for block in consumer_blocks(kb, kb.get_blocks(extraction_id)):
             usable, _why = block_evidence_usable(block.get("text", ""))
             if not usable:
                 continue
@@ -457,13 +459,15 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
             prompt_version=prompt_version, scope=scope):
         query = _document_query(kb, task["source"], task["doc_id"])
         all_blocks = kb.get_blocks(task["extraction_id"])
+        from .content import consumer_blocks, evidence_url
+        usable_blocks = consumer_blocks(kb, all_blocks)
         # TQ2: binary-polluted blocks (byte-decoded glyph indexes) are
         # not valid analysis evidence - excluded from the prompt. They
         # remain visible in the vault for diagnosis and TQ3 reprocessing
         from .quality import block_evidence_usable
 
-        blocks, excluded = [], 0
-        for block in all_blocks:
+        blocks, excluded = [], len(all_blocks) - len(usable_blocks)
+        for block in usable_blocks:
             usable, _why = block_evidence_usable(block.get("text", ""))
             if usable:
                 blocks.append(block)
@@ -568,10 +572,10 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                 citations = [{
                     "n": n,
                     "block_id": blocks[n - 1]["block_id"],
+                    "projection_id": blocks[n - 1].get("projection_id"),
                     "source": task["source"],
                     "doc_id": task["doc_id"],
-                    "evidence_url": "/api/kb/v1/evidence/%s"
-                                    % blocks[n - 1]["block_id"],
+                    "evidence_url": evidence_url(blocks[n - 1]),
                 } for n in valid_ns]
                 section_outputs.append({
                     "index": index,
@@ -687,6 +691,14 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
                            "status": "pending"})
             continue
 
+        from .content import context_current
+        if not context_current(kb, blocks):
+            with kb._tx() as conn:
+                conn.execute("UPDATE analysis_tasks SET status='blocked',blocked_reason='content_changed',lease_until=NULL,run_id=? WHERE task_key=?", (run_id,task["task_key"]))
+            kb.update_analysis_run(run_id, status="stale", error="content_changed_during_run")
+            failed += 1
+            errors.append({"task_key":task["task_key"],"error":"content_changed_during_run"})
+            continue
         # single-section documents need no synthesis pass; multi-section
         # documents complete only when the synthesis also ran
         complete_now = all_covered and (len(section_outputs) <= 1
@@ -733,10 +745,10 @@ def execute_analysis_tasks(kb: KnowledgeStore, chat,
             citations = [{
                 "n": n,
                 "block_id": blocks[n - 1]["block_id"],
+                "projection_id": blocks[n - 1].get("projection_id"),
                 "source": task["source"],
                 "doc_id": task["doc_id"],
-                "evidence_url": "/api/kb/v1/evidence/%s"
-                                % blocks[n - 1]["block_id"],
+                "evidence_url": evidence_url(blocks[n - 1]),
             } for n in valid_final]
             sections_all_valid = all(o.get("all_valid", True)
                                      for o in section_outputs)

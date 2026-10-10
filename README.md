@@ -1,5 +1,7 @@
 # Obsidian Research Knowledge Service
 
+[图表治理交付](docs/progress/CHART-CONTENT-DELIVERY-20261010.md) · [操作手册](docs/42-chart-governance-operations.md)：区域隔离、原图展示及统一检索/分析门禁已完成本地开发与样本验证，尚未部署或切换生产。
+
 [自动接入频率与手动同步](docs/40-manual-sync-and-cadence.md)：新增“立即同步资料”和本机 Syncthing 入口已完成本地验收，尚未部署；现网自动接入/历史修复保持原调度。
 
 **使用入口（2026-10-07）：[知识库 API 使用说明](docs/39-knowledge-api-usage.md)**。包含 Windows 连接、认证、全文检索、证据/正文和公司背景包示例，已只读核对现网。应用 `9d1b04f` 已发布，服务器历史正文修复按[运行记录](docs/progress/RELEASE-REPAIR-20261006.md)续行；[GLM 单次分析试用](docs/progress/GLM-TENCENT-PILOT-20261007.md)已完成，生产常驻模型服务尚未启用。下方“未部署”等均为历史阶段记录，不代表当前状态。

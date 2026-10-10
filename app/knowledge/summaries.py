@@ -228,6 +228,9 @@ def _entity_claim_evidence(kb: KnowledgeStore, entity_type: str,
             (entity_id,)).fetchall()
     evidence = []
     for row in rows:
+        from .content import is_stale, evidence_current
+        if is_stale(kb._conn, "claim", row["claim_id"], row["current_revision"]) or not evidence_current(kb._conn, [json.loads(row["evidence_json"] or "[]"), json.loads(row["counterevidence_json"] or "[]")]):
+            continue
         evidence.append({
             "claim_id": row["claim_id"],
             "revision": row["current_revision"],
@@ -297,7 +300,8 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                  max_blocks_per_doc)).fetchall()
             from .quality import block_evidence_usable
 
-            for block in blocks:
+            from .content import consumer_blocks
+            for block in consumer_blocks(kb, blocks):
                 usable, _why = block_evidence_usable(block["text"])
                 if not usable:
                     # TQ2: binary-polluted text stays in the vault for
@@ -311,6 +315,7 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
                     "extraction_id": (extraction["extraction_id"]
                                       if extraction else None),
                     "block_id": block["block_id"],
+                    "projection_id": block.get("projection_id"),
                     "page": locator.get("page"),
                     "text": block["text"],
                 })
@@ -345,6 +350,9 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
         else:
             analyses = []
         for row in analyses:
+            from .content import is_stale
+            if is_stale(kb._conn, "analysis", row["run_id"]):
+                continue
             if allowed_documents is not None and \
                     (row["source"], row["doc_id"]) not in allowed_documents:
                 # S1/SF01: derived analyses of out-of-scope documents
@@ -639,6 +647,11 @@ def consume_updates(kb: KnowledgeStore, chat=None, ledger=None,
                                                 exc)[:200]})
             continue  # stays pending for the next cycle
         ledger.settle(reservation, usage)
+        from .content import canonical
+        if canonical(evidence) != canonical(_summary_evidence(
+                kb, item["entity_type"], item["entity_id"], allowed_documents=allowed_documents)):
+            errors.append({"entity_id":item["entity_id"],"error":"content_changed_during_summary"})
+            continue
         record_summary(
             kb, item["entity_type"], item["entity_id"], content=draft,
             claim_revisions=evidence, model_identity=identity,
@@ -658,11 +671,12 @@ def summary_history(kb: KnowledgeStore, entity_type: str,
     ensure_schema(kb)
     with kb._lock:
         rows = kb._conn.execute(
-            "SELECT revision, status, blocked_reason, created_at,"
+            "SELECT id, revision, status, blocked_reason, created_at,"
             " content, event_key FROM summaries WHERE entity_type=? AND"
             " entity_id=? ORDER BY revision",
             (entity_type, entity_id)).fetchall()
-    return [dict(r) for r in rows]
+    from .content import is_stale
+    return [dict(r, content_stale=is_stale(kb._conn, "summary", str(r["id"]))) for r in rows]
 
 
 def latest_summary(kb: KnowledgeStore, entity_type: str,
@@ -764,6 +778,8 @@ def publish_pending_summaries(kb: KnowledgeStore, vault_dir: str,
             done_entities += 1
             state = "机器生成" if latest["status"] == STATUS_DONE \
                 else "待生成（模型未启用）"
+            if latest.get("content_stale"):
+                state = "证据内容已修订，历史总结待重算"
             entries.append("- [%s](%s) — rev %d，%s" % (
                 label, name, row["rev"], state))
         else:

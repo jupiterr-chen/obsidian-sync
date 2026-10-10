@@ -326,7 +326,9 @@ POST_MIGRATION_INDEXES = (
     " ON publish_outbox(source, doc_id, version_id, extraction_id)",
 )
 
-SCHEMA_VERSION = 2
+from .content import CONTENT_SCHEMA
+SCHEMA += CONTENT_SCHEMA
+SCHEMA_VERSION = 3
 
 
 class KnowledgeStore:

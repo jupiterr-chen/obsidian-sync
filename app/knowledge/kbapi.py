@@ -239,10 +239,13 @@ class KbApi:
         parts = ["|".join(str(r[i]) for i in range(8)) for r in rows]
         parts += ["v:" + "|".join(str(r[i]) for i in range(4))
                   for r in version_rows]
+        from .content import revision
+        parts.append("content:" + revision(self.kb._conn))
         epoch_source = "\n".join(parts)
         return hashlib.sha256(epoch_source.encode("utf-8")).hexdigest()[:12]
 
     def _hit_to_json(self, hit) -> Dict[str, Any]:
+        from .content import evidence_url
         block = hit.block
         evidence = to_evidence_block(block)
         text, _spans = snippet_for(block["text"], hit.matched_terms)
@@ -254,12 +257,14 @@ class KbApi:
             "source_sha256": block["snapshot_sha256"],
             "extraction_id": block["extraction_id"],
             "block_id": block["block_id"],
+            "projection_id": block.get("projection_id"),
+            "chart_assets": block.get("chart_assets", []),
             "block_type": block["block_type"],
             "text": block["text"],
             "snippet": text,
             "locator": block["locator"],
             "quality": block["quality"],
-            "evidence_url": "/api/kb/v1/evidence/%s" % block["block_id"],
+            "evidence_url": evidence_url(block),
             "source_version_url": "/api/kb/v1/documents/%s/%s/versions/%s" % (
                 block["source"], block["doc_id"], block["version_id"]),
             "score_kind": hit.score_kind,
@@ -359,7 +364,7 @@ class KbApi:
         return {"data": data, "media_type": media_type, "filename": filename,
                 "etag": '"%s"' % snap["sha256"]}
 
-    def evidence(self, block_id: str) -> Dict[str, Any]:
+    def evidence(self, block_id: str, projection_id=None) -> Dict[str, Any]:
         row = self.kb.get_block_with_identity(block_id)
         if row is None:
             raise KbApiError(404, "not_found", "evidence block not found")
@@ -372,8 +377,24 @@ class KbApi:
         index = next(i for i, b in enumerate(siblings) if b["block_id"] == block_id)
         context_before = [b["text"] for b in siblings[max(0, index - 1):index]]
         context_after = [b["text"] for b in siblings[index + 1:index + 2]]
+        from .content import project_block
+        try:
+            projection = project_block(self.kb._conn, row, projection_id=projection_id)
+        except ValueError as exc:
+            raise KbApiError(409, "projection_unavailable", str(exc))
+        if projection_id:
+            evidence = to_evidence_block(dict(row, text=projection["text"]))
+            evidence["projection_id"] = projection_id
+            from .content import consumer_blocks
+            context_before = [b["text"] for b in consumer_blocks(self.kb, siblings[max(0,index-1):index])]
+            context_after = [b["text"] for b in consumer_blocks(self.kb, siblings[index+1:index+2])]
         return {
             "evidence": evidence,
+            "default_projection": {k: projection.get(k) for k in
+                                   ("projection_id", "text", "chart_assets", "content_policy")},
+            "raw_evidence_retained": True,
+            "raw_evidence_url": "/api/kb/v1/evidence/" + block_id,
+            "projection_selection": "explicit" if projection_id else "current",
             "context": {"before": context_before, "after": context_after},
             "source_version_url": "/api/kb/v1/documents/%s/%s/versions/%s" % (
                 row["source"], row["doc_id"], row["version_id"]),
@@ -405,6 +426,27 @@ class KbApi:
                     "snapshot_sha256": extraction["snapshot_sha256"],
                 })) for b in page],
                 "next_cursor": next_cursor}
+
+    def chart_asset(self, block_id, name, projection_id=None):
+        """Serve only an asset actually referenced by this evidence version."""
+        from pathlib import Path
+        payload = self.evidence(block_id, projection_id)
+        assets = payload["default_projection"].get("chart_assets") or []
+        asset = next((a for a in assets if a["name"] == name), None)
+        if asset is None:
+            raise KbApiError(404, "not_found", "chart asset not referenced by evidence")
+        root = Path(self.kb.path).resolve().parent / "chart-assets"
+        path = root / name
+        if path.resolve().parent != root:
+            raise KbApiError(409, "asset_corrupted", "chart asset path mismatch")
+        try:
+            data = path.read_bytes()
+        except OSError:
+            raise KbApiError(404, "not_found", "chart asset unavailable")
+        if hashlib.sha256(data).hexdigest() != asset["sha256"]:
+            raise KbApiError(409, "asset_corrupted", "chart asset hash mismatch")
+        return {"data":data, "media_type":"image/png", "filename":name,
+                "etag":'"'+asset["sha256"]+'"'}
 
     def changes(self, cursor: Optional[str], limit: int = 100) -> Dict[str, Any]:
         sequence = 0
@@ -623,7 +665,13 @@ class Handler(BaseHTTPRequestHandler):
 
             if route[:1] == ["evidence"] and len(route) == 2:
                 self.api.authenticate(self._bearer(), PERM_READ)
-                return self._send(200, self.api.evidence(route[1]), head_only)
+                projection = (self._query().get("projection") or [None])[0]
+                return self._send(200, self.api.evidence(route[1], projection), head_only)
+
+            if route[:1] == ["evidence"] and len(route) == 4 and route[2] == "charts" and self.command == "GET":
+                self.api.authenticate(self._bearer(), PERM_READ)
+                projection = (self._query().get("projection") or [None])[0]
+                return self._send_blob(self.api.chart_asset(route[1], route[3], projection), head_only)
 
             if route[:1] == ["extractions"]:
                 self.api.authenticate(self._bearer(), PERM_READ)

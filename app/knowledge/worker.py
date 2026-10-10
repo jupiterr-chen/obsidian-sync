@@ -190,6 +190,13 @@ def run_cycle(config: KnowledgeConfig, library_config: Config,
                                       % row["extraction_id"]):
                         extraction_events += 1
             cycle["entity_extraction_events"] = extraction_events
+            from .content import scan_new_blocks
+            chart_settings = (config.extra or {}).get("chart_governance") or {}
+            # The deployed config owns this switch, including disabling it.
+            with kb._tx() as conn:
+                conn.execute("INSERT INTO content_settings VALUES('hold_candidates',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ('true' if chart_settings.get('enabled') and chart_settings.get('hold_candidates') else 'false',))
+            if chart_settings.get("enabled"):
+                cycle["chart_review"] = scan_new_blocks(kb, chart_settings.get("scan_limit", 500))
             cycle["index"] = build_generation(kb)
 
             # A3: extraction commits become durable pending publishes; the

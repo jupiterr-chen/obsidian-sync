@@ -185,6 +185,11 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
                         extraction = row
                         break
 
+            from .content import consumer_blocks, evidence_url
+            blocks = kb._conn.execute("SELECT block_id,text FROM blocks WHERE extraction_id=? AND ordinal<3 ORDER BY ordinal", (extraction["extraction_id"],)).fetchall() if extraction else []
+            refs = [{"extraction_id": extraction["extraction_id"], "block_id": b["block_id"],
+                     "projection_id": b.get("projection_id"), "evidence_url": evidence_url(b)}
+                    for b in consumer_blocks(kb, blocks)]
             sources.append({
                 "source": doc["source"], "doc_id": doc["doc_id"],
                 "version_id": version_id,
@@ -196,14 +201,7 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
                 "first_seen_at": doc["first_seen_at"],
                 "extraction_status": extraction["status"] if extraction
                 else None,
-                "evidence_refs": ([{
-                    "extraction_id": extraction["extraction_id"],
-                    "evidence_url": "/api/kb/v1/evidence/%s" % bid}
-                    for bid in [r[0] for r in kb._conn.execute(
-                        "SELECT block_id FROM blocks WHERE extraction_id=?"
-                        " AND ordinal < 3",
-                        (extraction["extraction_id"],)).fetchall()]
-                ] if extraction else []),
+                "evidence_refs": refs,
             })
 
         # filter BEFORE the limit (Q01: limiting current material first
@@ -235,6 +233,9 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
                 if revision_row is None:
                     continue
                 evidence = json.loads(revision_row["evidence_json"] or "[]")
+                from .content import is_stale, evidence_current
+                if is_stale(kb._conn, "claim", claim["claim_id"], revision_row["revision"]) or not evidence_current(kb._conn, [evidence, json.loads(revision_row["counterevidence_json"] or "[]")]):
+                    continue
                 if cutoff is not None and as_of_mode == "public":
                     # public mode: the cited content must itself have been
                     # public at the cutoff; unknown public time excludes
@@ -266,7 +267,10 @@ def build_background_package(kb: KnowledgeStore, entity_type: str,
 
         generation = kb.active_generation()
 
+    from .content import revision
     package = {
+        "content_revision": revision(kb._conn),
+        "content_policy_note": "Current content safety policy also applies to historical sources; invalidated claims are omitted, raw evidence is retained.",
         "kind": "background-package",
         "schema": "researchkb.background/1",
         "entity": {"type": entity_type, "id": entity_id},

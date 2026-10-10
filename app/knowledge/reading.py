@@ -41,6 +41,16 @@ def reading_filename(source: str, doc_id: str, extraction_id: str) -> str:
     return "text-%s-readable.md" % identity
 
 
+def current_reading_filename(kb, source, doc_id, extraction_id):
+    """Immutable view names keep both manual edits and prior projections."""
+    from .content import digest, canonical, has_table
+    if not has_table(kb._conn, "content_projection_heads"):
+        return reading_filename(source, doc_id, extraction_id)
+    rows = kb._conn.execute("SELECT h.block_id,h.projection_id FROM content_projection_heads h JOIN blocks b ON b.block_id=h.block_id WHERE b.extraction_id=? ORDER BY h.block_id", (extraction_id,)).fetchall()
+    name = reading_filename(source, doc_id, extraction_id)
+    return name[:-3] + "-chart-" + digest(canonical([list(r) for r in rows]))[:20] + ".md" if rows else name
+
+
 def render_reading_note(title: str, source: str, doc_id: str,
                         version_id: str, extraction: Dict[str, Any],
                         blocks: List[Dict[str, Any]], original_url: str) -> str:
@@ -81,6 +91,13 @@ def render_reading_note(title: str, source: str, doc_id: str,
             lines += ["> ⚠ 此页正文疑似二进制字形/控制字符污染（%s），"
                       "尚未修复；请对照 PDF 本页，勿将本页文字当研究证据。"
                       % "、".join(damage), ""]
+        if block.get("projection_id"):
+            lines += ["> 图表内容版本：`%s`。坐标和未确认归属的数字仅保留在原图与历史证据中；不作为精确财务数据。" % block["projection_id"], ""]
+        for asset in block.get("chart_assets", []):
+            lines += ["### " + literal(asset["caption"]), "",
+                      "![原图](图表资产/%s)" % asset["name"], "",
+                      "[原文第 %s 页](%s#page=%s)" % (asset["page"], original_url, asset["page"]),
+                      "", "> 原图裁切；图题来自原文。期间、单位和系列以图内标注为准；未生成趋势解释或估算数值。", ""]
         lines += [literal(block["text"]), "", "^" + block["block_id"], ""]
     return "\n".join(lines)
 
@@ -181,6 +198,11 @@ class ReadingPublisher:
             return False
         blocks = [b for b in self.kb.get_blocks(item["extraction_id"])
                   if b["text"].strip()]
+        from .content import project_blocks
+        from .chart_assets import publish_assets
+        blocks = project_blocks(self.kb._conn, blocks)
+        publish_assets(blocks, Path(self.kb.path).parent / "chart-assets",
+                       Path(self.output) / "图表资产")
         if not blocks:
             return False  # no readable text; the index lists it as absent
         with self.kb._lock:
@@ -192,7 +214,7 @@ class ReadingPublisher:
             title, item["source"], item["doc_id"], item["version_id"],
             extraction, blocks, self._original_url(
                 item["source"], item["doc_id"], item["version_id"]))
-        name = reading_filename(item["source"], item["doc_id"],
+        name = current_reading_filename(self.kb, item["source"], item["doc_id"],
                                 item["extraction_id"])
         write_candidate(self.output, name, content, owner="reading-publisher")
         return True
@@ -257,7 +279,7 @@ class ReadingPublisher:
                 state = extraction["status"]
                 if damaged_blocks:
                     state = "需修复（%d 页待处理）" % damaged_blocks
-                name = reading_filename(version["source"], version["doc_id"],
+                name = current_reading_filename(self.kb, version["source"], version["doc_id"],
                                         extraction["extraction_id"])
                 if not os.path.isfile(os.path.join(self.output, name)):
                     # text exists but this batch has not published the

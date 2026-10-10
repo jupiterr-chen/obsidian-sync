@@ -230,6 +230,10 @@ class AnalysisPublisher:
                                 or task["doc_id"])
                 url = self._original_url(task["source"], task["doc_id"],
                                          task["version_id"])
+                from .content import is_stale
+                if is_stale(self.kb._conn, "analysis", task["run_id"]):
+                    entries.append("- %s — 证据内容已修订，历史分析待重算；[原文](%s)" % (title, url))
+                    continue
                 # R4: link the path ACTUALLY published for THIS task
                 # identity (prompt/model revisions of the same document
                 # publish beside each other; the index reaches each one)

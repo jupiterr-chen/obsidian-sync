@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 图表治理已本地实现，待固定源码独立验收及本批生产授权。** [交付记录](CHART-CONTENT-DELIVERY-20261010.md)、[运行手册](../42-chart-governance-operations.md)、[任务书](../41-chart-content-governance.md)。区域投影、统一消费门禁、历史依赖失效、原图资产/阅读版本/API 已落地；真实 8 页及追加 2 页隔离验证完成。服务器只读对账 1,791 文件，Windows 同名 hash 全部一致；3 个登记 hash 冲突、268 未知归属、8 个归档候选均未动。生产仍用原策略；全候选确认、旧副本搜索隔离和新增暂缓开关待 G4。禁止恢复历史迁移或重跑 OCR；不使用 OpenCode，不擅自部署，不覆盖 docs/37 用户修改。
+
 > **2026-10-08 用户追加提高 GLM 并发，已从 2 路接续为 4 路。** 沿用既有 runner 的 `--workers 4`，应用/runner/recipe/页面缓存不变；原 8 份完成文档跳过，138 页已返回结果复用。新容器 ID `7be0e47d622bec65e340a70a9d690058780d638e1471a2d6cc4319831e8a51d4`，现行名称仍 `obsidian-sync-glm-ocr-20261008`；旧容器保留为 `obsidian-sync-glm-ocr-20261008-w2-retired`。读取 operation 的 `launch.json` 与 `concurrency-4/` 恢复记录，禁止重启旧写者；新 supervisor 独立运行。以下 2 路信息是首次启动历史。累计页数应汇总 item stats/页面缓存，重启后的 `status.json` 页计数只覆盖本进程。
 
 > **2026-10-08 GLM OCR 接续已在服务器启动。** 用户明确批准指定样本测试与原 458 份清单的剩余批次外发到现有 GLM-5.3-Flash 接口。真实试验通过限定混合路由：普通页 2 路并行，密集表格/失败/截断页回落本地 OCR，模型结果保留 review。旧 OCR 准确停止，已完成 249 份不重发，剩余 209 份冻结；容器 `obsidian-sync-glm-ocr-20261008` 已启动，应用镜像仍 `9d1b04f`。恢复先查服务器 `operations/glm-ocr-20261008/{status,launch,supervisor-status}.json`，禁止重复 handoff 或盲目重启旧 OCR。15.6 GB 一致性备份完整性/SHA 已通过，服务健康；新批次与结束后恢复本地增量 worker 的 supervisor 均独立于电脑运行。详情及真实验收限制见 [GLM OCR 记录](GLM-OCR-PILOT-20261008.md)。本轮未部署下面的手动同步按钮，未改常驻模型开关；保护 docs/37 既有用户修改。

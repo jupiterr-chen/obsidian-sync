@@ -250,7 +250,7 @@ def _current_entry_files(kb) -> set:
     extraction predicate (knowledge.effective), same as the reading and
     search indexes (S2)."""
     from .effective import effective_extraction
-    from .reading import reading_filename
+    from .reading import current_reading_filename
 
     entries = set()
     with kb._lock:
@@ -262,7 +262,7 @@ def _current_entry_files(kb) -> set:
                 kb._conn, version["source"], version["doc_id"],
                 version["version_id"])
             if chosen:
-                entries.add(reading_filename(
-                    version["source"], version["doc_id"],
+                entries.add(current_reading_filename(
+                    kb, version["source"], version["doc_id"],
                     chosen["extraction_id"]))
     return entries
