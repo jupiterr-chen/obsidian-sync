@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 12:13：图表隔离验收全部通过，自动生产切换已开始，尚未确认上线。** v2 隔离容器退出 0；8 页/26 图像、三连跑、原文保留、零新增模型使用及回退通过。`supervisor-v2-status.json=cutover_running`，12:13 `cutover-status.json=freezing_knowledge_writers`；准确服务停止/冻结备份/生产应用由现有 `cutover-v2.py` 继续，不重复启动。最新阶段以服务器 operation 检查点为准。Windows 此时 Obsidian CLI 找不到运行中的应用，实际搜索验收需要应用运行并开启 CLI；不影响服务器发布。继续沿用下方 v2 清单、回退位置、授权及 docs/37 保护规则。
+
 > **2026-10-10 11:20 图表治理授权发布：第二次隔离验收运行中，尚未切换生产。** 固定源码 `6679872`、8 页/26 图像、零新增模型调用。首轮因 Windows 样本导出换行改变导致 5 页清单哈希不同，已证明生产/备份/隔离原文一致，并对 8 页/41 区间按原始字节重新绑定；不改应用、不重跑 OCR。当前读 `operations/chart-release-6679872-20261010/` 内 `attempt-v2-launch.json`、`rebind-v2-result.json`、`isolated-result-v2.json`、`supervisor-v2-status.json`、`cutover-status.json`、`production-result.json`。首轮结果保留，仅为历史。续接脚本为 `check-v2.py`/`supervise-v2.py`/`cutover-v2.py`，必要回退为 `recover-v2.py` 配合 `manifests-v2/`；不要重跑启动脚本或根据旧 PID 操作。用户授权优先于下方历史“未授权”，不重复索要本次许可。[生产记录](CHART-PRODUCTION-20261010.md)有备份及证据。保护 docs/37 用户修改；旧 OCR/迁移任务不重启；实际 Obsidian 搜索仍待 CLI 开启。
 
 > **2026-10-10 图表治理本地发布候选独立验收通过，固定源码 `6679872`。** 用户本轮授权 Luna 执行、Codex 验收。分析页按引用绑定投影，不重新导出原始图表碎片；粗粒度 claim 与旧单篇分析的候选暂缓路径补齐；索引失败有独立 `reindex` 恢复入口且回退 CAS 不放宽。Codex 独立 6/6、全回归 468（466 通过/2 跳过）、干净提交 20/20；10 页既有真实隔离产物的 30 图片/33 保留范围复核通过。[验收报告](CHART-CONTENT-ACCEPTANCE-20261010.md)、[Luna 记录](LUNA-CHART-RELEASE-20261010.md)、[操作手册](../42-chart-governance-operations.md)。本批未部署、未调用真实模型、未改真实 Vault；G4 小批上线、全候选确认及 Obsidian 旧副本搜索隔离仍待对应授权和执行。不要复用旧 OCR 授权或重启历史任务；保护 docs/37 用户修改。下方为此前状态。

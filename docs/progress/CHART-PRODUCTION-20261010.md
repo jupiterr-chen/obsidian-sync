@@ -60,3 +60,11 @@
 11:19 服务器启动第二次禁网隔离容器 `obsidian-sync-chart-check-6679872-20261010-v2`，身份记录于 `attempt-v2-launch.json`；`check-v2.py` 已通过 8 页预检，正在构建隔离基线索引。11:20 实测 CPU 约 102%、内存 1.82 GiB、容器磁盘读 1.21 GB，属于实际计算阶段。此时生产 library/API 健康均为 HTTP 200，仍未切换。
 
 `supervise-v2.py` 已脱离 SSH 运行，只有第二次隔离的激活/发布三连跑、原始证据保留及回退全部通过且容器退出 0、普通 worker 空闲时，才执行 `cutover-v2.py`。发布镜像仍是独立验收的 `6679872`，没有应用源码修改或模型调用。只读后验工具和 Windows 验证继续使用原 `postcheck.py`、`audit.py`、`windows-verify.py`；生产结果文件名不变。若监督器超时，先核查新容器实际活动和检查点，不重做已完成的备份或初始部署。
+
+## 12:13 隔离全部通过，自动生产切换已开始
+
+第二次隔离容器于 12:12:50 正常退出（0，无 OOM）。`isolated-result-v2.json` 为 `passed`：8 页/26 图像、三连跑幂等、原文 hash 保留、模型使用账本不变、8 页回退及恢复索引均通过。隔离前后 `blocks=231075`、`extractions=1624`、`usage_events=1` 一致；这条历史 usage 记录不是本轮模型调用。只读复核隔离库已回退到 0 个活动投影，发布 outbox 全部 1009 条 consumed。隔离发布时报告的 4 个待发布/4 个无正文属于全库状态，不能据此宣称所有历史资料均已修复。
+
+12:12:54 监督器在普通 worker 空闲时开始 `cutover-v2.py`，阶段进入 `freezing_knowledge_writers`。12:13 检查时 library 和知识 API 仍返回 HTTP 200，停止请求尚在等待容器退出；此时尚未生成 `production-result.json` 或完成新版本切换。随后应依次核对冻结副本、生产小批应用、API/图像/原文可达和 worker 恢复，禁止并行重跑切换脚本。
+
+Windows 12:13 再查 `Obsidian.com version` 返回无法找到正在运行的 Obsidian；当前无法确认 CLI 是否已被用户开启。后续真实默认搜索验收需要 Obsidian 运行并开启 CLI，仍不影响服务器自动发布和文件 hash 对账。不要把配置或文件检查记作应用内搜索已通过。
