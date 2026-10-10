@@ -2,7 +2,7 @@
 
 ## 当前状态
 
-最新检查点见文末：原 30 项 v2 已结束，30 项真实视觉验收完成；仅放行剩余 832 项的 proposal 分类，不批准按模型 bbox 激活投影。
+最新检查点见文末：原 30 项 v2 已结束，30 项真实视觉验收完成；剩余 832 项的 9 批 proposal 分类已在服务器启动，不批准按模型 bbox 激活投影。
 
 北京时间 14:03：固定工具源码 `34edf468d9aaba55e0fe652f3ab9cfd2bc10954d` 已推送，30 项真实 GLM 试点已在服务器启动。Luna 离线 5 项测试由 Codex 复跑通过；Codex 另 6 项独立反例通过。用户已确认本方案，明确 GLM 额度充足；任务边界见 [任务书](../43-glm-chart-batch-taskbook.md) 和 AGENTS.md 首部。
 
@@ -68,3 +68,15 @@ v2 于 14:56:12 退出 0，无 OOM。35 个新增 dispatch 全部有结果、在
 两轮分歧常来自图题、脚注、页眉页脚与正文段落拆分。已经发现实际边界风险：11 号第一轮图框混入上一段末行且多图被截短，20 号第一轮图框纳入表格脚注，29 号第二轮漏掉坐标及部分负值柱；多页还存在图题/坐标边缘过紧。两轮 agreement 也不能替代精确字符定位。上述风险纳入 B3 保护清单，不能以模型 bbox 或共识直接排除正文。
 
 验收结论：B2 **仅作为候选分类、有例外保留的流程通过**，允许相同冻结清单剩余 832 项继续，4 并发、每批约 100、同一时间一个 runner；无需改代码或重跑已成功请求。B3 尚未验收，无 confirmed/activate，无生产 DB/Vault/常驻服务变化。批次监督器由 Luna 编制私有 operation helper，Codex 审查/离线验证后启动；不重用旧 OCR/部署监督器。
+
+## 15:17 剩余 832 项已在服务器顺序执行
+
+私有 `run_remaining_batches.py` 已完成审查，SHA256 `736f75b846186530be8a0de04d28ca834903654e4d79ad7607f8359e958a3857`。Luna 合成验证 9 批顺序执行及第 3 批异常停止；Codex 使用真实 `GLMChartRunner.run()` 的 fake provider 产物做 5 项独立集成检查，通过实际 report/cache 配对、已知截断保留、错误 endpoint 拒绝、意外 activation 拒绝、熔断拒绝。没有修改分类应用或常驻服务代码。
+
+服务器 `--plan-only` 通过后，Codex 另行逐对象核对 `remaining/plan.json` 与冻结父清单：832 项分为 `[100,100,100,100,100,100,100,100,32]`，与试点 30 项完全不交叉，内容逐项相同、无重复/遗漏。随后执行一次 `--execute`，监督器已脱离 SSH；不要重新初始化或重跑启动命令。每批前后核查来源当前身份，模型调用使用独立输出目录，至多一个分类容器、4 个在途请求；未知、熔断、非 0 或来源变化停止，不自动重试已知格式/截断例外。
+
+第一批 `obsidian-sync-glm-chart-rem-001-20261010` 于 **15:17:42** 启动，ID `ae162b20bdaf52d1f3595b5286674b89390459dd4ec51db86e977d6543e2a2eb`，以 `remaining/batch-001/launch.json` 为准。15:18:55 快照：第一批 100 项，7 次 dispatch、3 次返回且均 valid、4 次在途，双轮齐备项 0；这不是 7 项已完成。实际挂载 `/state`、`/candidate`、`/run/glm.json`、`/batch` 均只读，仅本批 `/operation` 可写，无 Vault 挂载。
+
+恢复入口：`sequence-status.json`、`sequence-events.jsonl`、`remaining/plan.json`、各批 `launch.json` / `run/cache/` / `batch-result.json`，全部结束时 `sequence-result.json`。`sequence-started.json` 有内部 token，只读聚合元数据，勿全文输出；PID 不作停进程依据。原 pilot/诊断/review 容器均不重启。该私有 helper 和逐项视觉证据在本地同名 runtime 与服务器 operation 保留，不进入 Git。
+
+现有半小时 heartbeat 已更新为本队列分支。检查时普通 worker 运行，library/knowledge API/Syncthing healthy；当前生产仍 `6679872`，既有 8 页投影不变。下一步是只读跟进 9 批候选分类及例外对账，结束后独立进入 B3；本轮不声称全库治理完成。
