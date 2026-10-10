@@ -1,5 +1,15 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 20:50 HTTP 500 留档续跑：已处理 230/862，剩余 632
+
+20:40 独立核对，第 2 批在 19:04:45 退出 0，200 个 dispatch 全有结果，100 项双轮齐备、96 项双轮 valid；轮次合计 196 valid、1 格式错误、2 截断、1 HTTP 500，无 circuit-open。旧 v3 监督器将 HTTP 500 拒绝为全局错误而停止，后续未启动。试点与两批累计处理 230 项（包含例外），剩余 632；不能将处理结束等同于图表治理完成。
+
+限定修复仅在私有 operation 调度层：可留档 HTTP 集合为 400/408/500/502/503/504；不重发任何已有 dispatch。认证/403/429、错模型、非普通超时、来源变化和证据缺失仍停止。Luna 工具经 Codex 独立复跑真实调度器 fake、prepare/freeze 实际目录结构与幂等分支测试后，通过服务器 plan-only；另行逐对象确认仅为原冻结第 003–009 批，632 项无重漏。固定分类源码、镜像及原 timeout entry 未改变。
+
+工具 SHA256：`resume_after_batch002.py=fae803a4c37829d544cd6112e76321a0c74669ff74de46901528d4c525ad2743`；`chart_continue_v3_http.py=d10414b632205aa0ba0a646063d3eecede1818b0331618359d9714458439fc7f`。新计划 SHA256 `39a3ba540ee77b7b3956ab894572ec70718df2dcb7c7355adbe0236a27772041`。
+
+20:50:40 监督器已脱离 SSH 启动；20:51:41 实查 `batch_running/batch-003`，容器 `glm-chart-v3-003-20261010` / `32b6dc8789a73421eb36d5eafbe1f2fbfa29c0ef9acec657c1c7ab598946a4a4` running、3 workers、policy marker 存在；state/source/secret/batch 均只读，operation 可写，未挂载 Vault。新 dispatch 0，仍为预检/渲染阶段，不宣称已有 GLM 返回。新恢复入口 `operations/glm-chart-batch-20261010/remaining/continuation-v3-http/`，先读 supervisor-launch、sequence-status、各批 remaining/batch-00N/launch 与 run/cache、stopped/complete；旧 v3 及所有旧结果保留，勿重复 execute。新批 3 并发、单 runner、proposal-only，生产 DB/Vault 不改。Codex 定时 heartbeat 仍暂停，服务器自动处理后续批次；B3 尚未执行。
+
 ## 后续恢复：v3 普通超时留档策略已验收，服务器 732 项重新接续
 
 **18:02:01 真实启动核验：** `sequence-status=batch_running/batch-002`，容器 `glm-chart-v3-002-20261010` / `3b0621cd8c7c2b157956ea5efbbe481c1d997fc7220287fa4afc222a2c2d8675` 在 18:01:49 启动。入口 policy marker 已生成，3 workers，所有 state/source/batch/secret 挂载只读，operation 可写；正在来源预检/渲染，dispatch 0、返回 0，不能将容器运行等同模型已返回。监督器进程命令身份已核验仍活跃；元数据见 v3 `handoff-snapshot.json`。

@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 20:50 新续跑入口：continuation-v3-http。** 第 2 批 100 项/200 请求完成（96 双 valid，1 HTTP500/1 schema/2 truncated），旧 v3 在 19:04 因 HTTP500 门禁停止。累计处理230/862，剩余632。限定操作层 HTTP 留档规则验收及服务器真实预检通过；20:50:40 新监督器已脱离SSH启动，20:51:41已实查batch-003容器32b6dc87…运行，3workers/只读生产挂载正确，dispatch0（预检渲染）。新目录 `operations/glm-chart-batch-20261010/remaining/continuation-v3-http/`，计划 `39a3ba54…`，仅原003–009批、3并发、旧请求不重发、生产只读/proposal-only。先读新 sequence/launch/cache/complete/stopped，勿重启旧v3。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节；定时 Codex 唤醒仍暂停，B3未开始。以下均为历史检查点。
+
 > **18:02:01 已实查 v3 第 2 批启动：** `sequence-status=batch_running/batch-002`，容器 `glm-chart-v3-002-20261010` / `3b0621cd…`，3 workers，policy marker 存在，生产只读挂载正确；dispatch/返回仍 0（预检渲染阶段）。监督器活跃。下一次进度只读 `remaining/continuation-v3/sequence-status.json`、当前批 cache 与 result，勿启动新开发或重复全量验收。
 
 > **2026-10-10 当前恢复入口已切至 v3。** 17:51 查明旧 49 已全发，但普通超时使旧后续队列停止；原 200 请求已零调用合并为 100 项/90 双 valid。Luna 操作层普通超时留档适配经 Codex 集中验收，剩余 8 批 732 项已提交服务器独立启动。新目录 `operations/glm-chart-batch-20261010/remaining/continuation-v3/`；只读 supervisor-launch/sequence-status/各批 cache/result 判断实际进度，不沿用旧 follow-on 状态或重复 execute。计划 SHA `92c888be…`，3 并发，未知不重发；普通 TimeoutError/HTTP400/schema/truncated 留异常后继续，认证/429/错模型/源变化等仍停止。工具 hash 与真实预检见[执行记录](GLM-CHART-BATCH-20261010.md)首节。生产服务/DB/Vault不改，Codex半小时唤醒保持暂停。
