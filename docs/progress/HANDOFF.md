@@ -1,5 +1,11 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 16:32 当前恢复入口：服务器续跑及后 8 批衔接均已启动。** 49 未发送请求续接实际 dispatch 23 / valid 返回 20 / 在途 3；`follow-on-supervisor-launch.json` 对应进程身份已核实，等待精确续接容器成功并完成对账后自动跑 002–009 共 732 项，3 并发。续批输出 `remaining/batch-001/continuation/follow-on/`；先读 status/result/停止记录，勿重跑 execute 或原 sequence。工具 SHA/门禁/检查点见[执行记录](GLM-CHART-BATCH-20261010.md)首节。生产服务健康，DB/Vault 只读，不 activate。半小时主模型 heartbeat 已暂停并缩短恢复提示；以后只做阶段验收，不恢复高频读取历史。用户 docs37 未动。以下为历史记录。
+
+> **2026-10-10 16:22：49 个未发送请求已在服务器续接。** 容器 `glm-chart-unissued-20261010` / `f1786fcd…`，源码工具 SHA `134df734…`，计划 SHA `a913a9ab…`，3 并发、旧 151 请求全部排除。完整 driver 离线 fake + 服务器逐对象差集验收通过。真实状态入口 `operations/glm-chart-batch-20261010/remaining/batch-001/continuation/`；16:22:49 running/尚在预检，dispatch 0。先查 started/status/results/cache，勿重跑 execute。后 8 批 732 项的服务器自动衔接尚在准备；生产只读、旧 9 异常保留、不激活投影。半小时 Codex heartbeat 保持暂停，按新分工只做阶段验收。详见[执行记录](GLM-CHART-BATCH-20261010.md)。
+
+> **2026-10-10 16:04 核验 / 用户恢复授权：第一批因超时停止，正在准备仅未发送请求续接。** 原 batch-001 在 15:59:53 退出 0，监督器因结果门禁停止；151 dispatch 对应 142 valid、2 HTTP 400、4 格式错误、2 截断、1 unknown timeout，45 项两轮有效。49 个第二轮请求从未发送，后 8 批未启动。旧请求均保留且不重发；Luna 私有 `resume_unissued.py` 正进行运行修正和独立验收，尚未获本次上线验收。用户要求降低 Codex 消耗：服务器脚本调度/统计、GLM 批量、Luna 限定修复、主会话阶段验收。原半小时 heartbeat 保持 PAUSED；不要恢复旧高频监控，不按历史“运行中”检查点重复启动。生产/应用源码不改；新运行状态以本条之后的启动记录为准。
+
 > **2026-10-10 15:34：第一批仍在第一轮，72 dispatch / 68返回（67valid、1 HTTP400）/4在途。** 第二轮未开始、双轮齐备0，最新返回距快照20秒，正在推进。HTTP400非认证/限流、无熔断、未重试；既有监督器会在本批结束后因该错误停止续批，届时核查实际结果和身份，勿盲目重启或改目录重发。当前不修改运行中任务，生产服务健康。详见[执行记录](GLM-CHART-BATCH-20261010.md)文末；sequence/各批launch仍是恢复入口。
 
 > **2026-10-10 15:17：剩余832项已启动9批服务器顺序分类。** 30项真实视觉验收完成、B2仅proposal放行，B3精确映射未验收。`remaining/plan.json`按100×8+32，根已核对冻结对象原样/排除30试点/不重不漏。私有`run_remaining_batches.py` SHA736f75b8…已审查，真实runner fake产物独立5项通过；`sequence-status.json`为恢复入口，勿重跑--execute。第一批launch容器ae162b20…15:17:42启动，15:18:55实际7请求/3valid返回/4在途、双轮齐备0。每批4并发、单runner顺序接续、state/secret/source只读，生产与Vault不改。原试点/诊断不重启，未知不重发，格式/截断保留例外。半小时heartbeat已更新；详细[执行记录](GLM-CHART-BATCH-20261010.md)。

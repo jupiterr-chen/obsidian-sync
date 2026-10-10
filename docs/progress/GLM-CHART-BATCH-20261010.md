@@ -1,5 +1,31 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 最新检查点：16:32 续接有实际返回，后 8 批监督器已脱离 SSH
+
+16:32:32 实查：49 请求续接已 dispatch 23、返回 20（均 valid）、3 在途；容器 running。普通 worker 运行，library/knowledge API/Syncthing healthy。尚未完成这 49 请求，不外推为真实图表质量通过。
+
+私有 `continue_after_batch1.py` SHA256 `006ee13dcf3cfb9da474ae6eec163be386545f2dd5c3476563d6ffadf994a1bb` 经 Codex 审查和独立复跑，通过真实 `execute_batches` + fake Docker 验证：002–009 批顺序、732 项、3 并发命令与元数据、错误计划 hash 零启动、重复启动拒绝。该薄封装复用固定应用和原调度器，不改分类应用。服务器监督器已经脱离 SSH，实查进程命令身份正确、正在等待准确续接容器结束；启动记录 `follow-on-supervisor-launch.json`，私有日志 `follow-on-supervisor.log`。PID 4093021 仅作该次启动线索，恢复时不得据旧 PID 操作。
+
+监督器在当前 49 请求退出 0、完整 100 项合并 proposal 与旧 151/新 49 dispatch/result 对账、旧异常保留、来源复核通过后，自动启动原剩余 732 项。输出在 `remaining/batch-001/continuation/follow-on/`：`plan.json`、`sequence-status.json`、各批 `remaining/batch-00N/{launch,batch-result}.json`，结束后 `sequence-result.json` / `follow-on-result.json`；失败时 `follow-on-stopped.json`（若停止发生在正式续批前，先查看监督器私有日志）。原 plan/sequence/batch-001 不覆盖，未确认模型输出不激活。新的未知、认证/限流、来源变化等仍停止留证，不盲目重发。
+
+用户可关闭本机，服务器任务不依赖当前 Codex 会话。半小时主模型 heartbeat 保持 PAUSED；日常调度/统计由脚本产物承担，下一次仅根据阶段产物做集中验收。B3 精确映射、裁图与生产投影尚未开始。交接统计 `continuation-handoff-snapshot.json` 只含状态元数据。
+
+## 16:22：49 个未发送请求已启动服务器续接
+
+私有 `resume_unissued.py` 固定 SHA256 `134df734927e4c59a39822b223e50e6b022cf0f3a2aa0ac026224207099203bf`。Luna 修复运行问题后，Codex 审查并复跑完整容器 driver 的离线 fake 流程：49 新调用、100 条合并 proposal、302 个旧缓存文件 hash 不变、旧 9 条异常保留、来源图片身份不符零调用、重复执行拒绝、全部 proposal-only。该测试的来源库/图片为合成输入，不能替代真实识别质量结论。
+
+服务器 plan-only 成功，Codex 另行逐对象核对 49 项恰为原 100 项清单第二轮未 dispatch 的差集，与旧 151 个请求完全不交叉。计划 SHA256 `a913a9abe123652f8437cc189dda3b1ece35a20d0f60fde7540e40bdc79653fa`，旧 dispatch/result hash、manifest binding 及固定源身份绑定。
+
+16:22:33 已启动 `glm-chart-unissued-20261010`，ID `f1786fcd862b16b57cc7d354ec6b0c6d742bd7b12184a3f8abad89ef8a72647e`，固定镜像不变。16:22:49 实查 running、无 OOM，仍在预检/渲染（新 dispatch 0）；不得将此时 running 说成模型已返回。`/state`、`/candidate`、`/batch`、secret 只读，仅 continuation operation 可写；3 并发为原未知请求保留余量。真实恢复入口 `remaining/batch-001/continuation/{plan,started,continuation-status,results,proposals-batch-001}.json` 及 `cache/`，先读产物勿重跑 execute。
+
+49 请求完成后保留原 9 个异常，合并为新的 100 项 proposal。后续 732 项正由 Luna 准备复用既有调度器的薄封装，尚未启动；不能据旧 sequence-status 推断新续接状态。半小时主模型 heartbeat 保持暂停。
+
+## 历史恢复点：16:04 核验，第一批停止；仅续接未发送请求
+
+第一批容器在北京时间 15:59:53 退出 0，但监督器因结果门禁停止，不能把容器退出 0 当作完整通过。151 个 dispatch 均有持久结果记录：142 valid、2 HTTP 400、4 invalid_json_or_schema、2 truncated、1 unknown_dispatch（TimeoutError）。最后一类仅是结果未知记录，不是已确认提供者返回。第一轮 100 次已发送，第二轮 51 次已发送、49 次从未发送；45 项两轮有效。后 8 批 732 项没有启动。旧结果、熔断记录和原序列检查点全部保留。
+
+用户暂停讨论用量后，已明确要求按新分工继续。后续由固定服务器脚本调度/统计，GLM 批量处理，Luna 限定修复，主会话集中阶段验收；已暂停的半小时 heartbeat 不随任务恢复而重启。49 项续接必须排除原全部 151 个请求（包含未知与已知错误），以独立目录、绑定计划 hash、只读生产挂载启动；为原未知请求保留余量，新并发上限 3。当前私有续接工具仍在运行修正与离线验收，未启动新真实请求。不得将旧 proposal 中因 circuit_open 未发出的轮次计为真实格式错误。B3 字符映射与投影尚未执行。
+
 ## 当前状态
 
 最新检查点见文末：原 30 项 v2 已结束，30 项真实视觉验收完成；剩余 832 项的 9 批 proposal 分类已在服务器启动，不批准按模型 bbox 激活投影。
