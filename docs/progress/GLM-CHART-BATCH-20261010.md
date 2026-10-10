@@ -2,9 +2,15 @@
 
 ## 当前状态
 
-北京时间 14:03：B1/B2 工具完成，Luna 离线 5 项测试由 Codex 复跑通过；Codex 另 6 项独立反例通过，准备固定源码并运行只读冻结和真实试点。尚未启动本批真实 GLM 请求。用户已确认本方案，明确 GLM 额度充足；任务边界见 [任务书](../43-glm-chart-batch-taskbook.md) 和 AGENTS.md 首部。
+北京时间 14:03：固定工具源码 `34edf468d9aaba55e0fe652f3ab9cfd2bc10954d` 已推送，30 项真实 GLM 试点已在服务器启动。Luna 离线 5 项测试由 Codex 复跑通过；Codex 另 6 项独立反例通过。用户已确认本方案，明确 GLM 额度充足；任务边界见 [任务书](../43-glm-chart-batch-taskbook.md) 和 AGENTS.md 首部。
 
-服务器已建立独立 operation：`/vol2/1000/10.Develop/obsidian-sync/operations/glm-chart-batch-20261010/`。目前只有 `preparation.json` 与 `audit-input.json`，前者保存授权范围、输入 hash、固定模型/接口和阶段；后者复制已完成的只读盘点。没有改生产数据库、Vault、配置或常驻服务。
+独立 operation：`/vol2/1000/10.Develop/obsidian-sync/operations/glm-chart-batch-20261010/`。恢复时先读 `preparation.json`、`freeze-launch.json`、`pilot-launch.json` 和 `pilot-run/`；不重复启动容器或请求。没有改生产数据库、Vault、配置或常驻服务。
+
+14:02 禁网冻结退出 0：862 个候选全部通过当前有效版本、原文/快照 hash 和投影 head 核对，跳过 0。试点 30 个唯一候选来自 30 份不同文档，native/OCR/unknown 各 10，包含 1 张 PNG；其余为 PDF 页。`frozen/candidates.json` 和 `frozen/pilot.json` 保留完整私有身份。
+
+14:03:10 启动独立容器 `obsidian-sync-glm-chart-pilot-20261010`，身份以 `pilot-launch.json` 为准。使用既有依赖镜像 `a3bab76c9e34`，候选源码另行只读挂载；state/snapshots 只读、现有 secret 只读、operation 可写。两轮、4 路并发，最多 60 次物理请求；没有生产投影写入。服务器进程脱离 SSH，本机关机不影响执行。
+
+沿用现有 `glm-research-kb` heartbeat，已更新为“GLM图表批处理与验收”，每半小时简报并续验；旧发布/OCR流程不再执行。真实模型结果、双轮分歧和视觉验收状态以本记录后续检查点为准。Codex 本地自动跟进仍需要本机应用运行；回来后可按服务器检查点继续。
 
 ## 输入与执行边界
 

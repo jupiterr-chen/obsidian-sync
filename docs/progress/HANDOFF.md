@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 14:03：GLM 图表 30 项真实试点已在服务器启动。** B1/B2 工具固定 `34edf46` 已推送，离线 5 项与 Codex 独立 6 项通过；禁网冻结核对 862/862 有效、跳过 0，30 试点来自 30 份文档，三来源各 10，含图片。新 operation `operations/glm-chart-batch-20261010`，先读 `pilot-launch.json`/实际容器与 `pilot-run/cache`、proposals；4 路、两轮、最多 60 请求，已 dispatch 无结果不重发。生产数据/服务不改，结果仅 proposal。现有 heartbeat 已改“GLM图表批处理与验收”继续半小时跟进，真实质量/后续批量与 B3 映射发布尚未完成。[执行记录](GLM-CHART-BATCH-20261010.md)含准确恢复路径；不得重启旧发布/OCR。下方为历史准备状态。
+
 > **2026-10-10 13:56：用户确认现有 GLM 批量治理剩余候选，额度不作为约束；先 30 页双轮试点。** [任务书](../43-glm-chart-batch-taskbook.md)、[新执行记录](GLM-CHART-BATCH-20261010.md)。Luna 正在限定新文件中实现 B1/B2，Codex 负责独立验收及真实运行。服务器新 operation `operations/glm-chart-batch-20261010` 已建立，目前仅 preparation/audit 输入，尚无本批真实调用；生产仍 `6679872`，不重跑已完成发布或旧 OCR。862 候选冻结时须复核有效版本/hash/head，结果仅 proposal；原文/表格、docs/37 与凭据边界继续保护。下方为已完成小批及历史状态。
 
 > **2026-10-10 13:16：图表小批已上线，服务器与 Windows 文件验收通过；只剩 Obsidian 实际 UI 验收。** 固定应用源码 `6679872`，12:46 三服务换成新镜像，worker 12:47 完成首轮。8 页/26 图像、8 raw/8 projected/8 PDF、生产三连跑、原文/账本保留、冻结备份独立 SHA 均通过；Windows 36/36 文件匹配，26 图像引用存在。已添加 53 条精确旧副本搜索排除，文件仍保留，配置备份在本地 operation runtime。全库有 862 块/159 文档版本的未确认线索；candidate hold 关闭，不把候选当已确认错误。Obsidian 未运行，CLI 无法连接，尚未实查默认搜索/图片显示，待用户打开应用并开启 CLI；跟进暂停，不重部署、不重跑 OCR。证据/备份/`recover-v2.py` 入口见[生产记录](CHART-PRODUCTION-20261010.md)。用户 docs/37 保持原 hash。下方是历史检查点。
