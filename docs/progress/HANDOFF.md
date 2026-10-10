@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 13:56：用户确认现有 GLM 批量治理剩余候选，额度不作为约束；先 30 页双轮试点。** [任务书](../43-glm-chart-batch-taskbook.md)、[新执行记录](GLM-CHART-BATCH-20261010.md)。Luna 正在限定新文件中实现 B1/B2，Codex 负责独立验收及真实运行。服务器新 operation `operations/glm-chart-batch-20261010` 已建立，目前仅 preparation/audit 输入，尚无本批真实调用；生产仍 `6679872`，不重跑已完成发布或旧 OCR。862 候选冻结时须复核有效版本/hash/head，结果仅 proposal；原文/表格、docs/37 与凭据边界继续保护。下方为已完成小批及历史状态。
+
 > **2026-10-10 13:16：图表小批已上线，服务器与 Windows 文件验收通过；只剩 Obsidian 实际 UI 验收。** 固定应用源码 `6679872`，12:46 三服务换成新镜像，worker 12:47 完成首轮。8 页/26 图像、8 raw/8 projected/8 PDF、生产三连跑、原文/账本保留、冻结备份独立 SHA 均通过；Windows 36/36 文件匹配，26 图像引用存在。已添加 53 条精确旧副本搜索排除，文件仍保留，配置备份在本地 operation runtime。全库有 862 块/159 文档版本的未确认线索；candidate hold 关闭，不把候选当已确认错误。Obsidian 未运行，CLI 无法连接，尚未实查默认搜索/图片显示，待用户打开应用并开启 CLI；跟进暂停，不重部署、不重跑 OCR。证据/备份/`recover-v2.py` 入口见[生产记录](CHART-PRODUCTION-20261010.md)。用户 docs/37 保持原 hash。下方是历史检查点。
 
 > **2026-10-10 12:13：图表隔离验收全部通过，自动生产切换已开始，尚未确认上线。** v2 隔离容器退出 0；8 页/26 图像、三连跑、原文保留、零新增模型使用及回退通过。`supervisor-v2-status.json=cutover_running`，12:13 `cutover-status.json=freezing_knowledge_writers`；准确服务停止/冻结备份/生产应用由现有 `cutover-v2.py` 继续，不重复启动。最新阶段以服务器 operation 检查点为准。Windows 此时 Obsidian CLI 找不到运行中的应用，实际搜索验收需要应用运行并开启 CLI；不影响服务器发布。继续沿用下方 v2 清单、回退位置、授权及 docs/37 保护规则。
