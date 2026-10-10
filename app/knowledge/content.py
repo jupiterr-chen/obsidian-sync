@@ -259,7 +259,20 @@ def rollback(kb, block_id, expected_projection_id):
             conn.execute("DELETE FROM content_projection_heads WHERE block_id=?",(block_id,))
         eid=conn.execute("INSERT INTO content_projection_events(block_id,old_projection_id,new_projection_id,created_at) VALUES(?,?,?,?)",(block_id,row[0],previous,now())).lastrowid
         _invalidate(conn,block_id,eid)
-    return {"restored_projection_id":previous}
+    return {"restored_projection_id":previous,"changed":True}
+
+
+def extraction_has_held_candidate(conn, extraction_id):
+    """Whether hold mode blocks any unprojected candidate in this extraction."""
+    if not has_table(conn, "content_settings"):
+        return False
+    setting=conn.execute("SELECT value FROM content_settings WHERE key='hold_candidates'").fetchone()
+    if not setting or setting[0] != "true":
+        return False
+    rows=conn.execute("SELECT b.block_id,b.text FROM blocks b WHERE b.extraction_id=?",(extraction_id,)).fetchall()
+    return any(not (has_table(conn,"content_projection_heads") and conn.execute(
+        "SELECT 1 FROM content_projection_heads WHERE block_id=?",(r[0],)).fetchone())
+        and chart_signals(r[1])["requires_review"] for r in rows)
 
 
 def project_block(conn, block, as_of=None, projection_id=None):
@@ -305,12 +318,37 @@ def is_stale(conn, kind, object_id, version=None):
 
 
 def evidence_current(conn, value):
-    """New claims cannot smuggle raw fragments back after a projection swap."""
+    """Reject evidence that cannot be tied to the currently safe content."""
     if isinstance(value, dict):
-        if value.get("block_id") and has_table(conn, "content_projection_heads"):
-            row=conn.execute("SELECT projection_id FROM content_projection_heads WHERE block_id=?", (value["block_id"],)).fetchone()
-            if value.get("projection_id") != (row[0] if row else None):
-                return False
+        if value.get("block_id"):
+            if has_table(conn, "content_projection_heads"):
+                row=conn.execute("SELECT projection_id FROM content_projection_heads WHERE block_id=?", (value["block_id"],)).fetchone()
+                if value.get("projection_id") != (row[0] if row else None):
+                    return False
+            setting=conn.execute("SELECT value FROM content_settings WHERE key='hold_candidates'").fetchone() if has_table(conn,"content_settings") else None
+            if setting and setting[0] == "true" and not value.get("projection_id"):
+                row=conn.execute("SELECT text FROM blocks WHERE block_id=?",(value["block_id"],)).fetchone()
+                if row and chart_signals(row[0])["requires_review"]:
+                    return False
+        elif value.get("extraction_id") or value.get("source") and value.get("doc_id"):
+            # A coarse reference cannot prove that it avoids a projected
+            # block or a page held for review. Fail closed only when one of
+            # its identified extractions actually contains such a block.
+            clauses=[]; params=[]
+            if value.get("extraction_id"):
+                clauses.append("e.extraction_id=?"); params.append(value["extraction_id"])
+            else:
+                clauses.extend(("e.source=?","e.doc_id=?")); params.extend((value["source"],value["doc_id"]))
+                if value.get("version_id"):
+                    clauses.append("e.version_id=?"); params.append(value["version_id"])
+            rows=conn.execute("SELECT b.block_id,b.text,b.extraction_id FROM blocks b JOIN extractions e USING(extraction_id) WHERE " + " AND ".join(clauses),params).fetchall()
+            if rows:
+                projected=has_table(conn,"content_projection_heads") and any(
+                    conn.execute("SELECT 1 FROM content_projection_heads WHERE block_id=?",(r[0],)).fetchone() for r in rows)
+                setting=conn.execute("SELECT value FROM content_settings WHERE key='hold_candidates'").fetchone() if has_table(conn,"content_settings") else None
+                held=bool(setting and setting[0] == "true" and any(chart_signals(r[1])["requires_review"] for r in rows))
+                if projected or held:
+                    return False
         return all(evidence_current(conn, v) for v in value.values())
     if isinstance(value,list):
         return all(evidence_current(conn, v) for v in value)

@@ -70,7 +70,7 @@ def main(argv=None):
     prep.add_argument("--output", required=True)
     prep.add_argument("--db", help="read-only source DB for exact native character mapping")
     prep.add_argument("--native-mapping", action="store_true")
-    for name in ("plan", "activate", "rollback", "scan", "report"):
+    for name in ("plan", "activate", "rollback", "scan", "report", "reindex"):
         command = sub.add_parser(name)
         command.add_argument("--db", required=True)
         if name in ("plan", "activate"):
@@ -142,6 +142,16 @@ def main(argv=None):
                 result["index"] = build_generation(kb)
             finally:
                 kb.close()
+    elif args.command == "reindex":
+        # Recovery after a committed projection-pointer change whose derived
+        # index build failed. Safe to repeat; build_generation is idempotent.
+        from .store import KnowledgeStore
+        from .indexing import build_generation
+        kb = KnowledgeStore(args.db)
+        try:
+            result = {"recovery": "reindex", "index": build_generation(kb)}
+        finally:
+            kb.close()
     elif args.command == "scan":
         result = scan(args.db)
     else:

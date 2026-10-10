@@ -1,5 +1,11 @@
 # 工程约定
 
+## 2026-10-10 图表治理委派与验收
+
+用户本轮明确要求将执行交给 Luna、由 Codex 验收。本批允许 Luna 在限定文件内核查和修复图表治理的发布前问题；Codex 独立复测后才能给出验收结论。不使用 OpenCode，不因此调用真实资料模型或扩大为生产任务。工作区既有 `docs/37-research-use-and-investment-workflow.md` 用户修改不属于本批。
+
+固定代码、自测或委派均不等于生产授权。图表治理发布与小批切换仍需独立验收通过后，取得用户对该次 commit 和切换范围的明确批准；旧 OCR/迁移授权不得沿用。任务入口 `docs/41-chart-content-governance.md`、运行手册 `docs/42-chart-governance-operations.md`。
+
 ## 2026-10-08 GLM OCR 接续授权
 
 用户明确要求“用GLM-5.3-Flash这个先试，如果可行就并行开始跑”，并在工具审批要求具体外发范围后回答“批准测试及剩余批次”。已批准同两份真实样本的指定页面测试，以及服务器原 458 份冻结修复清单中当时尚未完成的 OCR 页面发送至现有 `https://open.bigmodel.cn/api/anthropic/v1/messages`，使用 GLM-5.3-Flash 并行接续。此授权覆盖经本轮验收的一次性混合 OCR 接续脚本及准确旧 OCR 写者的交接，不重复询问相同许可。

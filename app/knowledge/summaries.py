@@ -350,8 +350,23 @@ def _entity_document_evidence(kb: KnowledgeStore, entity_type: str,
         else:
             analyses = []
         for row in analyses:
-            from .content import is_stale
+            from .content import (is_stale, evidence_current,
+                                  extraction_has_held_candidate)
             if is_stale(kb._conn, "analysis", row["run_id"]):
+                continue
+            if extraction_has_held_candidate(kb._conn,row["extraction_id"]):
+                continue
+            run_row = kb._conn.execute(
+                "SELECT citations_json FROM analysis_runs WHERE run_id=?",
+                (row["run_id"],)).fetchone() if row["run_id"] else None
+            citations = json.loads(run_row[0] or "[]") if run_row else []
+            if citations:
+                if not evidence_current(kb._conn, citations):
+                    continue
+            elif not evidence_current(kb._conn, [{
+                    "source": row["source"], "doc_id": row["doc_id"],
+                    "version_id": row["version_id"],
+                    "extraction_id": row["extraction_id"]} ]):
                 continue
             if allowed_documents is not None and \
                     (row["source"], row["doc_id"]) not in allowed_documents:

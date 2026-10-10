@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 from typing import Any, Dict, List, Optional
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from .store import KnowledgeStore, utc_now
 from .writeback import register_write_root, write_candidate
@@ -91,9 +91,13 @@ def render_analysis_page(title: str, task: Dict[str, Any], run: Dict[str, Any],
     if cited_blocks:
         lines += ["", "## 引用证据（原文块）", ""]
         for item in cited_blocks:
-            lines.append("- %s（第 %s 页，`%s`）：%s" % (
+            evidence = ("知识库证据路径（需经已认证客户端访问）：`%s`"
+                        % item["evidence_reference"]
+                        if item.get("evidence_reference") else "证据")
+            lines.append("- %s（第 %s 页，`%s`，%s）：%s" % (
                 cite_label(item), item.get("page", "?"),
-                item.get("block_id"), (item.get("text") or "").strip()))
+                item.get("block_id"), evidence,
+                (item.get("text") or "").strip()))
     lines += [
         "",
         "## 边界",
@@ -182,15 +186,30 @@ class AnalysisPublisher:
             if not block_id:
                 continue
             with self.kb._lock:
-                row = self.kb._conn.execute(
-                    "SELECT b.text, b.locator_json FROM blocks b"
-                    " WHERE b.block_id=?", (block_id,)).fetchone()
+                projection_id = citation.get("projection_id")
+                if projection_id:
+                    row = self.kb._conn.execute(
+                        "SELECT p.projected_text AS text,b.locator_json"
+                        " FROM content_projections p JOIN blocks b"
+                        " ON b.block_id=p.block_id WHERE p.block_id=?"
+                        " AND p.projection_id=?", (block_id, projection_id)).fetchone()
+                    if row is None:
+                        raise ValueError("cited content projection is unavailable")
+                else:
+                    # A historical citation without a projection id remains
+                    # bound to the raw evidence it originally cited.
+                    row = self.kb._conn.execute(
+                        "SELECT b.text, b.locator_json FROM blocks b"
+                        " WHERE b.block_id=?", (block_id,)).fetchone()
             if row:
                 locator = _load_json(row["locator_json"]) or {}
+                evidence_reference = "/api/kb/v1/evidence/%s" % quote(block_id, safe="")
+                if citation.get("projection_id"):
+                    evidence_reference += "?projection=" + quote(citation["projection_id"], safe="")
                 cited_blocks.append({
                     "n": citation.get("n"), "block_id": block_id,
                     "page": locator.get("page"),
-                    "text": row["text"]})
+                    "text": row["text"], "evidence_reference": evidence_reference})
         run_dict["cited_blocks"] = cited_blocks
         content = render_analysis_page(
             title, dict(task), run_dict, block_count,
