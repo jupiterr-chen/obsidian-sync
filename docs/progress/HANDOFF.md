@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 图表治理本地发布候选独立验收通过，固定源码 `6679872`。** 用户本轮授权 Luna 执行、Codex 验收。分析页按引用绑定投影，不重新导出原始图表碎片；粗粒度 claim 与旧单篇分析的候选暂缓路径补齐；索引失败有独立 `reindex` 恢复入口且回退 CAS 不放宽。Codex 独立 6/6、全回归 468（466 通过/2 跳过）、干净提交 20/20；10 页既有真实隔离产物的 30 图片/33 保留范围复核通过。[验收报告](CHART-CONTENT-ACCEPTANCE-20261010.md)、[Luna 记录](LUNA-CHART-RELEASE-20261010.md)、[操作手册](../42-chart-governance-operations.md)。本批未部署、未调用真实模型、未改真实 Vault；G4 小批上线、全候选确认及 Obsidian 旧副本搜索隔离仍待对应授权和执行。不要复用旧 OCR 授权或重启历史任务；保护 docs/37 用户修改。下方为此前状态。
+
 > **2026-10-10 图表治理固定实现 `1c718b3`，待独立验收及本批生产授权。** 全回归 464 项（462 通过/2 跳过），Git archive 干净源码 16 反例通过。[交付记录](CHART-CONTENT-DELIVERY-20261010.md)、[运行手册](../42-chart-governance-operations.md)、[任务书](../41-chart-content-governance.md)。区域投影、统一消费门禁、历史依赖失效、原图资产/阅读版本/API 已落地；真实 8 页及追加 2 页隔离验证完成。服务器只读对账 1,791 文件，Windows 同名 hash 全部一致；3 个登记 hash 冲突、268 未知归属、8 个归档候选均未动。生产仍用原策略；全候选确认、旧副本搜索隔离和新增暂缓开关待 G4。禁止恢复历史迁移或重跑 OCR；不使用 OpenCode，不擅自部署，不覆盖 docs/37 用户修改。
 
 > **2026-10-08 用户追加提高 GLM 并发，已从 2 路接续为 4 路。** 沿用既有 runner 的 `--workers 4`，应用/runner/recipe/页面缓存不变；原 8 份完成文档跳过，138 页已返回结果复用。新容器 ID `7be0e47d622bec65e340a70a9d690058780d638e1471a2d6cc4319831e8a51d4`，现行名称仍 `obsidian-sync-glm-ocr-20261008`；旧容器保留为 `obsidian-sync-glm-ocr-20261008-w2-retired`。读取 operation 的 `launch.json` 与 `concurrency-4/` 恢复记录，禁止重启旧写者；新 supervisor 独立运行。以下 2 路信息是首次启动历史。累计页数应汇总 item stats/页面缓存，重启后的 `status.json` 页计数只覆盖本进程。
