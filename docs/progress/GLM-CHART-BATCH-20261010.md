@@ -80,3 +80,11 @@ v2 于 14:56:12 退出 0，无 OOM。35 个新增 dispatch 全部有结果、在
 恢复入口：`sequence-status.json`、`sequence-events.jsonl`、`remaining/plan.json`、各批 `launch.json` / `run/cache/` / `batch-result.json`，全部结束时 `sequence-result.json`。`sequence-started.json` 有内部 token，只读聚合元数据，勿全文输出；PID 不作停进程依据。原 pilot/诊断/review 容器均不重启。该私有 helper 和逐项视觉证据在本地同名 runtime 与服务器 operation 保留，不进入 Git。
 
 现有半小时 heartbeat 已更新为本队列分支。检查时普通 worker 运行，library/knowledge API/Syncthing healthy；当前生产仍 `6679872`，既有 8 页投影不变。下一步是只读跟进 9 批候选分类及例外对账，结束后独立进入 B3；本轮不声称全库治理完成。
+
+## 15:34 只读进度：第一批第一轮，记录一次 HTTP 400
+
+15:34:50 快照仍为 `batch-001`，运行约 17 分钟：72 次 dispatch / 68 个持久结果 / 4 个在途；68 个结果均属第一轮，其中 67 valid、1 provider_http_error。较 15:18:55 新增 65 个返回；第二轮尚未开始，因此本批双轮齐备项仍为 0，9 批完整结束数仍为 0。最新结果仅距检查约 20 秒，在途请求耗时约 20–43 秒，有实际请求进展，不能把序列状态时间停留在启动时刻误报为卡死。
+
+只读核对异常元数据：该错误为 HTTP **400**、第一轮、约 84.991 秒；不是认证/限流错误，当前无 circuit-open，也没有自动重试。没有保存该 HTTP 错误正文，尚不能据状态码推断具体原因。当前分类容器继续本批既定请求；现有监督器仅允许 valid/格式/截断结果继续下一批，因此该 HTTP 错误会在本批完成检查时阻止自动续批，届时先查实际结果与调用身份，不盲目重启或补发未知请求。本轮不修改运行中的监督器或调用范围。
+
+当前容器约 292 MiB 内存，无 OOM；library/knowledge API/Syncthing healthy，普通 worker 运行。本轮仅只读核对和进度记录，无模型重试、服务变更或生产写入。
