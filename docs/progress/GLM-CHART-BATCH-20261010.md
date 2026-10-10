@@ -2,6 +2,8 @@
 
 ## 当前状态
 
+最新检查点见文末：原 30 项 v2 已结束，30 项真实视觉验收完成；仅放行剩余 832 项的 proposal 分类，不批准按模型 bbox 激活投影。
+
 北京时间 14:03：固定工具源码 `34edf468d9aaba55e0fe652f3ab9cfd2bc10954d` 已推送，30 项真实 GLM 试点已在服务器启动。Luna 离线 5 项测试由 Codex 复跑通过；Codex 另 6 项独立反例通过。用户已确认本方案，明确 GLM 额度充足；任务边界见 [任务书](../43-glm-chart-batch-taskbook.md) 和 AGENTS.md 首部。
 
 独立 operation：`/vol2/1000/10.Develop/obsidian-sync/operations/glm-chart-batch-20261010/`。恢复时先读 `preparation.json`、`freeze-launch.json`、`pilot-launch.json` 和 `pilot-run/`；不重复启动容器或请求。没有改生产数据库、Vault、配置或常驻服务。
@@ -54,3 +56,15 @@ Codex 已实际查看试点序号 13/16/25/30 的原图及两轮框选：四项�
 14:44:47 新容器 `obsidian-sync-glm-chart-pilot-v2-20261010` 已脱离 SSH 启动。身份/镜像/归档 hash 见 `pilot-v2-launch.json`，输出 `pilot-run-v2/`；使用原 `frozen/pilot.json`，固定 4 路并发，本轮最多 35 次物理请求。成功项走复用缓存、不创建新 dispatch；未知结果不得改目录重发。生产服务、数据库和 Vault 保持原样，常驻模型开关没有改变。
 
 后续统计必须区分 `usage_provenance=reused_response` 与 `physical_response`，以 dispatch 配对结果计新增请求；`responses/` 中原始回复只作私有诊断。v2 完成后对其余 26 项真实图像续验，832 个后续候选仍未启动。旧原试点及串行诊断已经结束，不能重启。现有半小时 heartbeat 已更新此恢复分支。
+
+## 15:04 起：v2 完成与 30 项真实视觉验收
+
+v2 于 14:56:12 退出 0，无 OOM。35 个新增 dispatch 全部有结果、在途/未知 0；另复用 25 个回复。合计 59 valid、1 truncated，29 项两轮有效、1 项仅一轮有效；页级比较 4 agreement、25 disagreement、1 invalid。不要按 result 中不存在的 item_id 聚合页数，应以 proposals 的逐项双轮记录对账。截断项为试点序号 26，按既定有界策略保留例外，不追加第三轮。
+
+15:05 在禁网、生产 state 只读容器生成 `review-v2/` 的 30 张原图与双轮框选，退出 0。Codex 实际查看余下 26 张；序号 13/16/25/30 与此前已目视验收的图片 SHA 完全相同，沿用其真实结论。逐项来源图/复核图 hash、判断、限制保存于私有 `visual-review-v2.json`。
+
+真实观察：22 项包含图表（共 58 个图表面板），8 项仅表格/正文，应保留全部文字。8 项包含带数据条或迷你折线的真实表格，不能因含图形而整表屏蔽。本分层试点不是全库随机精度统计，不外推为全库准确率。
+
+两轮分歧常来自图题、脚注、页眉页脚与正文段落拆分。已经发现实际边界风险：11 号第一轮图框混入上一段末行且多图被截短，20 号第一轮图框纳入表格脚注，29 号第二轮漏掉坐标及部分负值柱；多页还存在图题/坐标边缘过紧。两轮 agreement 也不能替代精确字符定位。上述风险纳入 B3 保护清单，不能以模型 bbox 或共识直接排除正文。
+
+验收结论：B2 **仅作为候选分类、有例外保留的流程通过**，允许相同冻结清单剩余 832 项继续，4 并发、每批约 100、同一时间一个 runner；无需改代码或重跑已成功请求。B3 尚未验收，无 confirmed/activate，无生产 DB/Vault/常驻服务变化。批次监督器由 Luna 编制私有 operation helper，Codex 审查/离线验证后启动；不重用旧 OCR/部署监督器。
