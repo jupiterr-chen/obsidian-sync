@@ -1,5 +1,7 @@
 # 图表治理生产执行记录（2026-10-10）
 
+**当前结果：12:46 已上线固定源码 `6679872` 的 8 页/26 图像小批；13:16 前服务器、备份、Windows 文件与精确搜索配置验收通过。仅 Obsidian 应用内实际搜索/图片显示尚待应用运行并开启 CLI。全库候选治理未完成。下方各时间点保留为执行历史，不能将早期失败或停写状态当作现状。**
+
 ## 授权与固定输入
 
 用户在独立验收后要求“继续吧，开发完了就开始部署和后续任务”。本次发布已验收源码 `6679872c532d78161035f4af643329252a3f8738`，不再重复索要该次发布许可。部署执行由 Codex 负责；Luna 只编制只读盘点工具，没有访问生产或外发资料。
@@ -68,3 +70,31 @@
 12:12:54 监督器在普通 worker 空闲时开始 `cutover-v2.py`，阶段进入 `freezing_knowledge_writers`。12:13 检查时 library 和知识 API 仍返回 HTTP 200，停止请求尚在等待容器退出；此时尚未生成 `production-result.json` 或完成新版本切换。随后应依次核对冻结副本、生产小批应用、API/图像/原文可达和 worker 恢复，禁止并行重跑切换脚本。
 
 Windows 12:13 再查 `Obsidian.com version` 返回无法找到正在运行的 Obsidian；当前无法确认 CLI 是否已被用户开启。后续真实默认搜索验收需要 Obsidian 运行并开启 CLI，仍不影响服务器自动发布和文件 hash 对账。不要把配置或文件检查记作应用内搜索已通过。
+
+## 13:16 生产与 Windows 文件验收结果
+
+生产应用容器于 12:46:26 退出 0，`production-result.json=passed`；12:46:31 完成 library、knowledge API、worker 切换，`cutover-status.json=deployed_pending_windows_verification`。三个服务均实查运行在新镜像 `sha256:a3bab76c9e34b5c6c686142591f18860e6686c0e8f8e8759c9f303a6c0d8e2a8`，API/library 健康为 HTTP 200。worker 于 12:47:34 完成上线后首轮，已恢复半小时增量周期。监督器正常完成退出，没有再次部署。
+
+|验收面|实际结果|
+|---|---|
+|生产小批|8 页活动投影、26 PNG；三连跑幂等；原始正文、提取数及模型使用账本不变|
+|API 与原文|8 raw / 8 projected / 26 图像 hash / 8 PDF HEAD 均通过|
+|历史与备份|独立后台复算冻结 knowledge/catalog 两库 hash 全匹配；8 页原始文本与冻结副本一致，8 个源 PDF 在当前快照与预备备份中 hash 一致|
+|人工区|发布窗口非解析正文区变动为 0；用户 docs/37 hash 未变、未暂存|
+|服务边界|原 Syncthing 容器身份不变，服务器 research-vault 的 ignorePerms=true；旧 OCR 容器保持退出；常驻分析/所有 provider egress 关闭|
+|发布队列|schema 3、活动投影 8，outbox 1009 consumed；没有本批待发布项|
+|Windows 同步|8 新正文 + 26 图像 + 阅读索引/状态页，共 36 文件 hash 全匹配；正文中的 26 个图像引用均有对应本地文件|
+|旧副本搜索配置|53 个明确归属、登记 hash 一致、非当前入口且无人工引用的旧生成文件，已添加精确 userIgnoreFilters；所有 53 文件保留，36 当前文件不被新规则匹配|
+|实际 Obsidian UI|未验收。应用当前未运行，CLI 无法连接；此前尚未确认开启 CLI，文件/配置验证不等于应用内默认搜索通过|
+
+只读全库盘点 `audit-after.json` 正常退出 0：548 个当前有效文档、108,227 个默认消费块、8 个已确认活动投影；现行规则找到 **862 个未确认候选块，涉及 159 个文档版本**，逐页来源分组为原生 209、OCR 457、unknown 196。这些是图表/表格等复核线索，不能当成 862 个已确认错误；现行规则与 G0 分类口径不同，不能按数量相减宣称消除了相应污染。worker 首轮有界扫描只检查 500 块（499 not_flagged、1 pending），其队列不是全库候选总数。
+
+当前 `chart_governance.enabled=true`、`hold_candidates=false`、`scan_limit=500`。未经确认的候选没有自动改写或激活；旧文件未知归属、hash 冲突或人工引用均保持保护。53 条排除不等于全部历史副本已完成治理。接下来全库扩展按原 G4 分批确认区域、保护真实表格/正文、再绑定源 hash 后应用；模型图意分析、数字校准、旧分析重算和 7 天观察没有在本次完成。
+
+### 恢复与待办入口
+
+- 正常使用：Windows `ResearchVault/解析正文/开始阅读.md`；手动资料同步按钮也随本次 library 新镜像上线。它触发资料接入，不是强制重做 OCR。
+- 服务器证据：同一 operation 下 `production-result.json`、`api-verification.json`、`server-verification.json`、`frozen-verification.json`、`audit-after.json`；报告正文/图像/凭据未进入 Git。
+- 冻结备份：`operations/chart-release-6679872-20261010/frozen-backup/`；预备副本及隔离恢复：同目录 `backup/`、`isolated/`。使用 `recover-v2.py` 和 `manifests-v2/` 做严格 CAS 投影回退前须重新冻结准确写者；不得用旧数据库覆盖新写入。
+- 本地配置备份：`runtime/chart-release-6679872-20261010/obsidian-app-before-search.json`；应用记录 `windows-search-result.json`。如需恢复配置，只在当前 hash 仍匹配记录时合并处理；保留此后用户设置，不覆盖新改动。
+- 唯一剩余本次 UI 验收：打开 Obsidian 并开启“设置 → 通用 → 高级 → 命令行界面”后，实查当前正文可搜索、53 旧副本默认不命中、图像可显示。当前自动发布跟进暂停，等待用户完成该动作；无需再次授权部署或重跑服务器小批。

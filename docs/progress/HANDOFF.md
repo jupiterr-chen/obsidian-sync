@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-10 13:16：图表小批已上线，服务器与 Windows 文件验收通过；只剩 Obsidian 实际 UI 验收。** 固定应用源码 `6679872`，12:46 三服务换成新镜像，worker 12:47 完成首轮。8 页/26 图像、8 raw/8 projected/8 PDF、生产三连跑、原文/账本保留、冻结备份独立 SHA 均通过；Windows 36/36 文件匹配，26 图像引用存在。已添加 53 条精确旧副本搜索排除，文件仍保留，配置备份在本地 operation runtime。全库有 862 块/159 文档版本的未确认线索；candidate hold 关闭，不把候选当已确认错误。Obsidian 未运行，CLI 无法连接，尚未实查默认搜索/图片显示，待用户打开应用并开启 CLI；跟进暂停，不重部署、不重跑 OCR。证据/备份/`recover-v2.py` 入口见[生产记录](CHART-PRODUCTION-20261010.md)。用户 docs/37 保持原 hash。下方是历史检查点。
+
 > **2026-10-10 12:13：图表隔离验收全部通过，自动生产切换已开始，尚未确认上线。** v2 隔离容器退出 0；8 页/26 图像、三连跑、原文保留、零新增模型使用及回退通过。`supervisor-v2-status.json=cutover_running`，12:13 `cutover-status.json=freezing_knowledge_writers`；准确服务停止/冻结备份/生产应用由现有 `cutover-v2.py` 继续，不重复启动。最新阶段以服务器 operation 检查点为准。Windows 此时 Obsidian CLI 找不到运行中的应用，实际搜索验收需要应用运行并开启 CLI；不影响服务器发布。继续沿用下方 v2 清单、回退位置、授权及 docs/37 保护规则。
 
 > **2026-10-10 11:20 图表治理授权发布：第二次隔离验收运行中，尚未切换生产。** 固定源码 `6679872`、8 页/26 图像、零新增模型调用。首轮因 Windows 样本导出换行改变导致 5 页清单哈希不同，已证明生产/备份/隔离原文一致，并对 8 页/41 区间按原始字节重新绑定；不改应用、不重跑 OCR。当前读 `operations/chart-release-6679872-20261010/` 内 `attempt-v2-launch.json`、`rebind-v2-result.json`、`isolated-result-v2.json`、`supervisor-v2-status.json`、`cutover-status.json`、`production-result.json`。首轮结果保留，仅为历史。续接脚本为 `check-v2.py`/`supervise-v2.py`/`cutover-v2.py`，必要回退为 `recover-v2.py` 配合 `manifests-v2/`；不要重跑启动脚本或根据旧 PID 操作。用户授权优先于下方历史“未授权”，不重复索要本次许可。[生产记录](CHART-PRODUCTION-20261010.md)有备份及证据。保护 docs/37 用户修改；旧 OCR/迁移任务不重启；实际 Obsidian 搜索仍待 CLI 开启。
