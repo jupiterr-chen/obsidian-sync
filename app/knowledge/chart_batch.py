@@ -86,6 +86,23 @@ def save_json_once(path: Path, value: Any) -> str:
     return sha256_bytes(data)
 
 
+def _response_text(response: Any) -> str | None:
+    if not isinstance(response, dict) or not isinstance(response.get("content"), list):
+        return None
+    parts = [part.get("text") for part in response["content"]
+             if isinstance(part, dict) and part.get("type") == "text"]
+    if not parts or any(not isinstance(part, str) for part in parts):
+        return None
+    return "\n".join(parts).strip()
+
+
+def _json_payload_text(raw: str) -> str:
+    """Remove only a complete, outer JSON markdown fence; never surrounding prose."""
+    import re
+    match = re.fullmatch(r"```(?:json)?[ \t]*\r?\n([\s\S]*?)\r?\n```", raw.strip(), re.IGNORECASE)
+    return match.group(1).strip() if match else raw.strip()
+
+
 def _resolved_inside(path: Path, root: Path) -> bool:
     try:
         return os.path.commonpath((str(path.resolve()), str(root.resolve()))).casefold() == str(root.resolve()).casefold()
@@ -441,12 +458,11 @@ def parse_provider_response(response: Any) -> tuple[str, dict | None, str | None
     content = response.get("content")
     if not isinstance(content, list):
         return "invalid_response", None, None, {}
-    texts = [part.get("text") for part in content if isinstance(part, dict) and part.get("type") == "text"]
-    if not texts or any(not isinstance(text, str) for text in texts):
+    raw = _response_text(response)
+    if raw is None:
         return "invalid_response", None, None, {}
-    raw = "\n".join(texts).strip()
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(_json_payload_text(raw))
         regions = validate_regions(parsed)
     except (ValueError, TypeError, BatchError):
         return "invalid_json_or_schema", None, sha256_bytes(raw.encode("utf-8")), response.get("usage") if isinstance(response.get("usage"), dict) else {}
@@ -494,7 +510,8 @@ class GLMChartRunner:
     """Two independent, cached proposal passes; transport is injectable."""
     def __init__(self, operation: Path, secret: dict | None = None,
                  transport=None, allow_egress: bool = False,
-                 workers: int = MAX_WORKERS, source_digest: str | None = None):
+                 workers: int = MAX_WORKERS, source_digest: str | None = None,
+                 resume_from: list[Path] | None = None):
         if type(workers) is not int or not 1 <= workers <= MAX_WORKERS:
             raise BatchError("workers must be between 1 and 4")
         if secret is not None:
@@ -511,9 +528,174 @@ class GLMChartRunner:
         self.allow_egress = allow_egress
         self.workers = workers
         self.recipe = _recipe_hash(source_digest)
+        self.resume_from = [Path(path) for path in (resume_from or [])]
+        self.manifest_hash: str | None = None
         self.guard = threading.RLock()
         self.inflight: dict[str, threading.Event] = {}
         self.disabled = (operation / "circuit-open.json").exists()
+
+    def _input_identity(self, item: dict, image: bytes, round_number: int,
+                        recipe: str) -> str:
+        return sha256_bytes(canonical_bytes({
+            "item_id": item["item_id"], "image_sha256": sha256_bytes(image),
+            "text_hash": item["text_hash"], "source_digest_recipe": recipe,
+            "round": round_number, "prompt_sha256": PROMPT_SHA256[round_number],
+            "model": MODEL, "endpoint": ENDPOINT}))
+
+    @staticmethod
+    def _validate_cached_outcome(value: Any, input_hash: str, recipe_hash: str,
+                                 round_number: int) -> dict:
+        if not isinstance(value, dict):
+            raise BatchError("cached result is not an object")
+        if (value.get("input_hash") != input_hash or value.get("recipe_hash") != recipe_hash
+                or value.get("round") != round_number):
+            raise BatchError("cached result identity does not match dispatch")
+        status = value.get("status")
+        if status == "valid":
+            if (value.get("model", "").casefold() != MODEL.casefold()
+                    or value.get("stop_reason") != "end_turn"
+                    or not isinstance(value.get("response_sha256"), str)
+                    or len(value["response_sha256"]) != 64):
+                raise BatchError("cached valid result metadata is incomplete")
+            classification = value.get("classification")
+            if not isinstance(classification, dict):
+                raise BatchError("cached classification is missing")
+            value = dict(value)
+            value["classification"] = {"regions": validate_regions(classification)}
+        elif status in ("unknown_dispatch", "provider_transport_error"):
+            value = dict(value)
+            value["status"] = "unknown_dispatch"
+        elif status not in ("invalid_json_or_schema", "invalid_response", "truncated",
+                            "wrong_model", "provider_http_error", "runner_error"):
+            raise BatchError("cached result status is not recognized")
+        if "usage" in value and not isinstance(value["usage"], dict):
+            raise BatchError("cached usage metadata is invalid")
+        return value
+
+    def _raw_response(self, operation: Path, input_hash: str) -> tuple[Path | None, dict | None]:
+        candidates = [operation / "responses" / (input_hash + ".json")]
+        # One bounded legacy diagnostic artifact is accepted only when a linked result
+        # supplies the response hash that authenticates its text payload.
+        candidates.append(operation / "raw-response.json")
+        for path in candidates:
+            if not path.is_file():
+                continue
+            try:
+                value = read_json(path)
+            except (OSError, ValueError):
+                raise BatchError("raw provider response is unreadable")
+            if not isinstance(value, dict):
+                raise BatchError("raw provider response is not an object")
+            return path, value
+        return None, None
+
+    def _resume_item(self, item: dict, image: bytes, round_number: int) -> tuple[dict, dict | None] | None:
+        for operation in self.resume_from:
+            binding_path = operation / "manifest-binding.json"
+            if binding_path.exists():
+                binding = read_json(binding_path)
+                if not isinstance(binding, dict) or binding.get("manifest_sha256") != self.manifest_hash:
+                    raise BatchError("resume operation is bound to another frozen manifest")
+            cache = operation / "cache"
+            if not cache.is_dir():
+                continue
+            for dispatch_path in sorted(cache.glob("r%d-*.dispatch.json" % round_number)):
+                try:
+                    dispatch = read_json(dispatch_path)
+                except (OSError, ValueError):
+                    raise BatchError("resume dispatch marker is unreadable")
+                if not isinstance(dispatch, dict):
+                    raise BatchError("resume dispatch marker is not an object")
+                old_recipe = dispatch.get("recipe_hash")
+                old_input = dispatch.get("input_hash")
+                if not isinstance(old_recipe, str) or len(old_recipe) != 64:
+                    if dispatch.get("item_id") == item["item_id"]:
+                        raise BatchError("resume dispatch recipe identity is invalid")
+                    continue
+                expected_old_input = self._input_identity(item, image, round_number, old_recipe)
+                expected_filename = "r%d-%s.dispatch.json" % (round_number, expected_old_input)
+                if dispatch_path.name != expected_filename and dispatch.get("item_id") != item["item_id"]:
+                    continue
+                if dispatch_path.name != expected_filename:
+                    raise BatchError("resume dispatch filename does not match its source")
+                if dispatch.get("item_id") != item["item_id"] or dispatch.get("round") != round_number:
+                    raise BatchError("resume dispatch item/round identity changed")
+                if not isinstance(old_input, str):
+                    raise BatchError("resume dispatch recipe identity is invalid")
+                if (old_input != expected_old_input
+                        or dispatch.get("image_sha256") != sha256_bytes(image)
+                        or dispatch.get("model") != MODEL or dispatch.get("endpoint") != ENDPOINT):
+                    raise BatchError("resume dispatch input identity changed")
+                result_path = cache / ("r%d-%s.json" % (round_number, old_input))
+                stored_result = None
+                result_hash = None
+                if result_path.exists():
+                    try:
+                        stored_result = read_json(result_path)
+                    except (OSError, ValueError):
+                        raise BatchError("resume result is unreadable")
+                    stored_result = self._validate_cached_outcome(
+                        stored_result, old_input, old_recipe, round_number)
+                    result_hash = sha256_bytes(result_path.read_bytes())
+                direct_raw_path = operation / "responses" / (old_input + ".json")
+                raw_path, raw = self._raw_response(operation, old_input)
+                if raw is not None:
+                    raw_text = _response_text(raw)
+                    if raw_text is None:
+                        raise BatchError("resume raw response has no text payload")
+                    raw_hash = sha256_bytes(raw_text.encode("utf-8"))
+                    if stored_result is None or stored_result.get("response_sha256") != raw_hash:
+                        if raw_path == direct_raw_path:
+                            raise BatchError("resume raw response hash does not match its result")
+                        raw = None
+                    if raw is not None:
+                        parsed_status, classification, output_hash, usage = parse_provider_response(raw)
+                    else:
+                        parsed_status = None
+                    if parsed_status == "valid":
+                        if stored_result.get("status") == "valid" and (
+                                stored_result.get("classification") != classification
+                                or stored_result.get("usage", {}) != usage):
+                            raise BatchError("resume raw response disagrees with cached result")
+                        reused = {"status": "valid", "classification": classification,
+                            "response_sha256": output_hash, "usage": usage,
+                            "model": raw.get("model"), "stop_reason": raw.get("stop_reason"),
+                            "seconds": stored_result.get("seconds", 0)}
+                        reused["reuse_provenance"] = {
+                            "operation": operation.name, "input_hash": old_input,
+                            "recipe_hash": old_recipe, "result_sha256": result_hash,
+                            "source_file": str(raw_path.relative_to(operation)) if raw_path.is_relative_to(operation)
+                                else raw_path.name}
+                        return reused, raw
+                if stored_result is None:
+                    # A marker without a result is an unknown dispatch. It must never be retried.
+                    return {"status": "unknown_dispatch", "reuse_provenance": {
+                        "operation": operation.name, "input_hash": old_input,
+                        "recipe_hash": old_recipe, "result_sha256": None,
+                        "source_file": dispatch_path.name}}, None
+                if stored_result["status"] in ("unknown_dispatch", "provider_transport_error"):
+                    return {**stored_result, "reuse_provenance": {
+                        "operation": operation.name, "input_hash": old_input,
+                        "recipe_hash": old_recipe, "result_sha256": result_hash,
+                        "source_file": result_path.name}}, None
+                if stored_result["status"] == "valid":
+                    return {**stored_result, "reuse_provenance": {
+                        "operation": operation.name, "input_hash": old_input,
+                        "recipe_hash": old_recipe, "result_sha256": result_hash,
+                        "source_file": result_path.name}}, None
+                if stored_result["status"] not in ("invalid_json_or_schema", "invalid_response", "truncated"):
+                    if stored_result["status"] == "wrong_model":
+                        self._trip_circuit("wrong_model")
+                    elif (stored_result["status"] == "provider_http_error"
+                          and stored_result.get("http_status") in (401, 403, 429)):
+                        self._trip_circuit("provider_http_error", stored_result["http_status"])
+                    return {**stored_result, "reuse_provenance": {
+                        "operation": operation.name, "input_hash": old_input,
+                        "recipe_hash": old_recipe, "result_sha256": result_hash,
+                        "source_file": result_path.name}}, None
+                # Known invalid/truncated outcomes with no recoverable valid raw output
+                # may receive at most one fresh request under this operation's identity.
+        return None
 
     def _provider_transport(self, payload: dict) -> dict:
         if self.transport is not None:
@@ -547,18 +729,26 @@ class GLMChartRunner:
                 pass
 
     def _request(self, item: dict, image: bytes, media_type: str, round_number: int) -> dict:
-        input_identity = sha256_bytes(canonical_bytes({
-            "item_id": item["item_id"], "image_sha256": sha256_bytes(image),
-            "text_hash": item["text_hash"], "source_digest_recipe": self.recipe,
-            "round": round_number, "prompt_sha256": PROMPT_SHA256[round_number],
-            "model": MODEL, "endpoint": ENDPOINT}))
+        input_identity = self._input_identity(item, image, round_number, self.recipe)
         result_path = self.cache_root / ("r%d-%s.json" % (round_number, input_identity))
         dispatch_path = self.cache_root / ("r%d-%s.dispatch.json" % (round_number, input_identity))
+        response_path = self.operation / "responses" / (input_identity + ".json")
         with self.guard:
             if result_path.exists():
                 try:
-                    cached = read_json(result_path)
-                except (OSError, ValueError):
+                    cached = self._validate_cached_outcome(read_json(result_path), input_identity,
+                                                           self.recipe, round_number)
+                    if response_path.is_file():
+                        raw_response = read_json(response_path)
+                        raw_text = _response_text(raw_response)
+                        if (raw_text is None or cached.get("response_sha256") !=
+                                sha256_bytes(raw_text.encode("utf-8"))):
+                            raise BatchError("cached raw response hash does not match its result")
+                        raw_status, raw_classification, _, _ = parse_provider_response(raw_response)
+                        if raw_status != cached.get("status") or (raw_status == "valid" and
+                                raw_classification != cached.get("classification")):
+                            raise BatchError("cached raw response does not match parsed result")
+                except (OSError, ValueError, BatchError):
                     return {"status": "invalid_cached_result", "input_hash": input_identity}
                 return cached
             event = self.inflight.get(input_identity)
@@ -577,7 +767,31 @@ class GLMChartRunner:
                     pass
             return {"status": "unknown_dispatch", "input_hash": input_identity}
         try:
+            resumed = self._resume_item(item, image, round_number) if self.resume_from else None
+            if resumed is not None:
+                outcome, reused_raw = resumed
+                if reused_raw is not None:
+                    save_json_once(response_path, reused_raw)
+                outcome = dict(outcome)
+                outcome.update({"input_hash": input_identity, "round": round_number,
+                                "recipe_hash": self.recipe, "usage_provenance": "reused_response"})
+                save_json_once(result_path, outcome)
+                return outcome
             if dispatch_path.exists():
+                if response_path.is_file():
+                    try:
+                        raw_response = read_json(response_path)
+                        parsed_status, classification, output_hash, usage = parse_provider_response(raw_response)
+                    except (OSError, ValueError):
+                        return {"status": "invalid_cached_response", "input_hash": input_identity}
+                    outcome = {"status": parsed_status, "classification": classification,
+                        "response_sha256": output_hash, "usage": usage,
+                        "model": raw_response.get("model") if isinstance(raw_response, dict) else None,
+                        "stop_reason": raw_response.get("stop_reason") if isinstance(raw_response, dict) else None,
+                        "input_hash": input_identity, "round": round_number,
+                        "recipe_hash": self.recipe, "usage_provenance": "physical_response"}
+                    save_json_once(result_path, outcome)
+                    return outcome
                 return {"status": "unknown_dispatch", "input_hash": input_identity}
             with self.guard:
                 if self.disabled:
@@ -610,13 +824,17 @@ class GLMChartRunner:
                 self._trip_circuit("provider_transport_error")
                 outcome = {"status": "unknown_dispatch", "error_type": type(exc).__name__}
             else:
+                # Preserve the actual provider response separately from cache/statistics;
+                # it contains no request, headers, or credentials.
+                save_json_once(response_path, response)
                 status, classification, output_hash, usage = parse_provider_response(response)
                 if status == "wrong_model":
                     self._trip_circuit(status)
                 outcome = {"status": status, "classification": classification,
                            "response_sha256": output_hash, "usage": usage,
                            "model": response.get("model") if isinstance(response, dict) else None,
-                           "stop_reason": response.get("stop_reason") if isinstance(response, dict) else None}
+                           "stop_reason": response.get("stop_reason") if isinstance(response, dict) else None,
+                           "usage_provenance": "physical_response"}
             outcome.update({"input_hash": input_identity, "round": round_number,
                             "seconds": round(time.monotonic() - started, 3),
                             "recipe_hash": self.recipe})
@@ -646,6 +864,16 @@ class GLMChartRunner:
             if sha256_bytes(raw) != item["snapshot_sha256"]:
                 raise BatchError("frozen snapshot hash changed before dispatch")
         manifest_hash = sha256_bytes(canonical_bytes(manifest))
+        self.manifest_hash = manifest_hash
+        for operation in self.resume_from:
+            binding_path = operation / "manifest-binding.json"
+            if binding_path.exists():
+                try:
+                    binding = read_json(binding_path)
+                except (OSError, ValueError):
+                    raise BatchError("resume manifest binding is unreadable")
+                if not isinstance(binding, dict) or binding.get("manifest_sha256") != manifest_hash:
+                    raise BatchError("resume operation is bound to another frozen manifest")
         binding = {"manifest_sha256": manifest_hash, "schema": manifest["schema"]}
         binding_path = self.operation / "manifest-binding.json"
         save_json_once(binding_path, binding)

@@ -53,6 +53,18 @@ class ChartBatchTest(unittest.TestCase):
         status, _, output_hash, _ = parse_provider_response(raw)
         self.assertEqual(status, "invalid_json_or_schema")
         self.assertEqual(output_hash, sha256_bytes(b"not-json"))
+        fenced = {"model": "GLM-5.3-Flash", "stop_reason": "end_turn",
+                  "usage": {"input_tokens": 77}, "content": [{"type": "text",
+                  "text": '```json\n{"regions":[]}\n```'}]}
+        status, classification, _, usage = parse_provider_response(fenced)
+        self.assertEqual((status, classification, usage["input_tokens"]),
+                         ("valid", {"regions": []}, 77))
+        fenced_empty_language = {**fenced, "content": [{"type": "text",
+            "text": '```\n{"regions":[]}\n```'}]}
+        self.assertEqual(parse_provider_response(fenced_empty_language)[0], "valid")
+        fenced_with_prose = {**fenced, "content": [{"type": "text",
+            "text": 'Here is JSON:\n```json\n{"regions":[]}\n```'}]}
+        self.assertEqual(parse_provider_response(fenced_with_prose)[0], "invalid_json_or_schema")
 
     def test_stratified_pilot_keeps_single_image_with_render_page_one(self):
         items = []
@@ -188,6 +200,195 @@ class ChartBatchTest(unittest.TestCase):
         other = {**item, "item_id": "different"}
         self.assertEqual(auth_runner._request(other, b"page", "image/png", 1)["status"], "circuit_open")
         self.assertEqual(len(attempted), 1)
+
+    def _write_legacy_dispatch(self, operation, runner, item, image, round_number,
+                               result=None, raw=None, recipe="f" * 64):
+        old_hash = runner._input_identity(item, image, round_number, recipe)
+        cache = operation / "cache"
+        cache.mkdir(parents=True, exist_ok=True)
+        dispatch = {"input_hash": old_hash, "item_id": item["item_id"],
+                    "round": round_number, "image_sha256": sha256_bytes(image),
+                    "model": "GLM-5.3-Flash",
+                    "endpoint": "https://open.bigmodel.cn/api/anthropic/v1/messages",
+                    "recipe_hash": recipe, "at_unix": 1}
+        save_json_once(cache / ("r%d-%s.dispatch.json" % (round_number, old_hash)), dispatch)
+        result_path = cache / ("r%d-%s.json" % (round_number, old_hash))
+        if result is not None:
+            save_json_once(result_path, {"input_hash": old_hash, "recipe_hash": recipe,
+                "round": round_number, **result})
+        if raw is not None:
+            save_json_once(operation / "raw-response.json", raw)
+        return old_hash, result_path
+
+    def test_resume_reuses_legacy_valid_and_fenced_raw_without_network(self):
+        item = {"item_id": "resume-item", "text_hash": "text-hash", "text": "safe source",
+                "source": "s", "doc_id": "d", "version_id": "v", "extraction_id": "e",
+                "block_id": "b", "snapshot_sha256": "h", "page": 1,
+                "source_category": "native"}
+        image = b"same-rendered-page"
+        old_op = self.root / "old-op"
+        old = GLMChartRunner(self.root / "probe", transport=lambda _: _response(), source_digest="new")
+        regions = [{"kind": "chart", "bbox": [0, 0, 0.5, 0.5],
+                    "caption_hint": None, "uncertainty": None}]
+        old_raw = {"model": "GLM-5.3-Flash", "stop_reason": "end_turn",
+            "usage": {"input_tokens": 101, "output_tokens": 13},
+            "content": [{"type": "text", "text": "```json\n" + json.dumps(
+                {"regions": regions}, separators=(",", ":")) + "\n```"}]}
+        output_hash = sha256_bytes(old_raw["content"][0]["text"].strip().encode())
+        self._write_legacy_dispatch(old_op, old, item, image, 1,
+            result={"status": "invalid_json_or_schema", "response_sha256": output_hash,
+                    "usage": old_raw["usage"], "model": "GLM-5.3-Flash",
+                    "stop_reason": "end_turn", "seconds": 1.25}, raw=old_raw)
+        new_op = self.root / "new-op"
+        calls = []
+        runner = GLMChartRunner(new_op, transport=lambda payload: calls.append(payload) or self.fail("network"),
+                                source_digest="new", resume_from=[old_op])
+        runner.manifest_hash = "manifest-hash"
+        result = runner._request(item, image, "image/png", 1)
+        self.assertEqual(result["status"], "valid")
+        self.assertEqual(result["usage"], old_raw["usage"])
+        self.assertEqual(result["usage_provenance"], "reused_response")
+        self.assertEqual(result["reuse_provenance"]["input_hash"],
+                         read_json(old_op / "cache" / next(p.name for p in (old_op / "cache").glob("*.dispatch.json")))["input_hash"])
+        self.assertFalse(calls)
+        self.assertTrue((new_op / "responses" / (result["input_hash"] + ".json")).is_file())
+
+    def test_resume_valid_cache_and_timeout_then_known_failure_retry_once(self):
+        item = {"item_id": "resume-valid", "text_hash": "hash", "text": "safe",
+                "source": "s", "doc_id": "d", "version_id": "v", "extraction_id": "e",
+                "block_id": "b", "snapshot_sha256": "h", "page": 1,
+                "source_category": "native"}
+        image = b"page"
+        old = GLMChartRunner(self.root / "hasher", transport=lambda _: _response(), source_digest="new")
+        valid_op = self.root / "valid-old"
+        raw = _response([{"kind": "table", "bbox": [0, 0, 1, 1],
+                          "caption_hint": None, "uncertainty": None}])
+        status, classification, response_hash, usage = __import__(
+            "knowledge.chart_batch", fromlist=["parse_provider_response"]).parse_provider_response(raw)
+        self.assertEqual(status, "valid")
+        self._write_legacy_dispatch(valid_op, old, item, image, 2,
+            result={"status": "valid", "classification": classification,
+                "response_sha256": response_hash, "usage": usage, "model": raw["model"],
+                "stop_reason": raw["stop_reason"], "seconds": 2.0})
+        calls = []
+        new = GLMChartRunner(self.root / "valid-new", transport=lambda p: calls.append(p),
+                             source_digest="new", resume_from=[valid_op])
+        new.manifest_hash = "manifest-hash"
+        reused = new._request(item, image, "image/png", 2)
+        self.assertEqual(reused["status"], "valid")
+        self.assertEqual(reused["usage_provenance"], "reused_response")
+        self.assertFalse(calls)
+
+        unknown_op = self.root / "timeout-old"
+        timeout_item = {**item, "item_id": "timeout-item"}
+        self._write_legacy_dispatch(unknown_op, old, timeout_item, image, 1, result=None)
+        attempted = []
+        timeout_runner = GLMChartRunner(self.root / "timeout-new",
+            transport=lambda p: attempted.append(p) or _response(), source_digest="new",
+            resume_from=[unknown_op])
+        timeout_runner.manifest_hash = "manifest-hash"
+        self.assertEqual(timeout_runner._request(timeout_item, image, "image/png", 1)["status"],
+                         "unknown_dispatch")
+        self.assertFalse(attempted)
+
+        invalid_op = self.root / "invalid-old"
+        invalid_item = {**item, "item_id": "known-invalid"}
+        invalid_raw = {"model": "GLM-5.3-Flash", "stop_reason": "max_tokens",
+                       "usage": {"input_tokens": 9}, "content": [{"type": "text", "text": "cut"}]}
+        invalid_hash = sha256_bytes(b"cut")
+        self._write_legacy_dispatch(invalid_op, old, invalid_item, image, 1,
+            result={"status": "truncated", "response_sha256": invalid_hash,
+                    "usage": invalid_raw["usage"], "model": invalid_raw["model"],
+                    "stop_reason": "max_tokens"}, raw=invalid_raw)
+        attempts = []
+        replacement = GLMChartRunner(self.root / "invalid-new",
+            transport=lambda p: attempts.append(p) or _response(), source_digest="new",
+            resume_from=[invalid_op])
+        replacement.manifest_hash = "manifest-hash"
+        self.assertEqual(replacement._request(invalid_item, image, "image/png", 1)["status"], "valid")
+        self.assertEqual(replacement._request(invalid_item, image, "image/png", 1)["status"], "valid")
+        self.assertEqual(len(attempts), 1)
+
+    def test_resume_tampered_dispatch_or_bound_manifest_fails_before_transport(self):
+        item = {"item_id": "tamper-item", "text_hash": "hash", "text": "safe",
+                "source": "s", "doc_id": "d", "version_id": "v", "extraction_id": "e",
+                "block_id": "b", "snapshot_sha256": "h", "page": 1,
+                "source_category": "native"}
+        image = b"same-page"
+        old = GLMChartRunner(self.root / "hasher-tamper", transport=lambda _: _response(), source_digest="new")
+        tampered = self.root / "tampered-old"
+        self._write_legacy_dispatch(tampered, old, item, image, 1)
+        dispatch_path = next((tampered / "cache").glob("*.dispatch.json"))
+        marker = read_json(dispatch_path)
+        marker["image_sha256"] = "0" * 64
+        dispatch_path.write_text(json.dumps(marker), encoding="utf-8")
+        called = []
+        runner = GLMChartRunner(self.root / "tampered-new",
+            transport=lambda p: called.append(p) or _response(), source_digest="new",
+            resume_from=[tampered])
+        runner.manifest_hash = "manifest-hash"
+        with self.assertRaises(BatchError):
+            runner._request(item, image, "image/png", 1)
+        self.assertFalse(called)
+
+        tampered_result = self.root / "tampered-result-old"
+        old_hash, result_path = self._write_legacy_dispatch(
+            tampered_result, old, item, image, 1,
+            result={"status": "truncated", "response_sha256": "a" * 64,
+                    "model": "GLM-5.3-Flash", "stop_reason": "max_tokens"})
+        result_value = read_json(result_path)
+        result_value["input_hash"] = "b" * 64
+        result_path.write_text(json.dumps(result_value), encoding="utf-8")
+        runner_result = GLMChartRunner(self.root / "tampered-result-new",
+            transport=lambda p: called.append(p) or _response(), source_digest="new",
+            resume_from=[tampered_result])
+        runner_result.manifest_hash = "manifest-hash"
+        with self.assertRaises(BatchError):
+            runner_result._request(item, image, "image/png", 1)
+        self.assertFalse(called)
+
+        bound = self.root / "wrong-manifest-op"
+        bound.mkdir()
+        save_json_once(bound / "manifest-binding.json", {"manifest_sha256": "other-manifest"})
+        runner2 = GLMChartRunner(self.root / "bound-new", transport=lambda _: self.fail("network"),
+                                 source_digest="new", resume_from=[bound])
+        runner2.manifest_hash = "manifest-hash"
+        with self.assertRaises(BatchError):
+            runner2._resume_item(item, image, 1)
+
+    def test_resume_auth_or_wrong_model_keeps_circuit_open(self):
+        item = {"item_id": "old-auth", "text_hash": "hash", "text": "safe",
+                "source": "s", "doc_id": "d", "version_id": "v", "extraction_id": "e",
+                "block_id": "b", "snapshot_sha256": "h", "page": 1,
+                "source_category": "native"}
+        image = b"page"
+        hasher = GLMChartRunner(self.root / "auth-hasher", transport=lambda _: _response(), source_digest="new")
+        old_op = self.root / "old-auth-op"
+        self._write_legacy_dispatch(old_op, hasher, item, image, 1,
+            result={"status": "provider_http_error", "http_status": 401})
+        attempted = []
+        runner = GLMChartRunner(self.root / "auth-resume-op",
+            transport=lambda payload: attempted.append(payload) or _response(), source_digest="new",
+            resume_from=[old_op])
+        runner.manifest_hash = "manifest-hash"
+        self.assertEqual(runner._request(item, image, "image/png", 1)["status"], "provider_http_error")
+        another = {**item, "item_id": "another-item"}
+        self.assertEqual(runner._request(another, image, "image/png", 1)["status"], "circuit_open")
+        self.assertFalse(attempted)
+
+        wrong_op = self.root / "old-wrong-model-op"
+        wrong_item = {**item, "item_id": "old-wrong-model"}
+        self._write_legacy_dispatch(wrong_op, hasher, wrong_item, image, 2,
+            result={"status": "wrong_model", "model": "unexpected-model",
+                    "stop_reason": "end_turn"})
+        wrong_attempts = []
+        wrong_runner = GLMChartRunner(self.root / "wrong-model-resume-op",
+            transport=lambda payload: wrong_attempts.append(payload) or _response(), source_digest="new",
+            resume_from=[wrong_op])
+        wrong_runner.manifest_hash = "manifest-hash"
+        self.assertEqual(wrong_runner._request(wrong_item, image, "image/png", 2)["status"], "wrong_model")
+        self.assertTrue((wrong_runner.operation / "circuit-open.json").is_file())
+        self.assertFalse(wrong_attempts)
 
 
 if __name__ == "__main__":

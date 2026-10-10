@@ -68,6 +68,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--operation", type=Path, required=True)
     run.add_argument("--secret", type=Path, required=True)
     run.add_argument("--workers", type=int, default=4)
+    run.add_argument("--resume-from", type=Path, action="append", default=[],
+                     help="reuse verified cache/results from an earlier operation; may be repeated")
     run.add_argument("--allow-egress", action="store_true",
                      help="explicitly permit requests to the fixed GLM endpoint")
     return parser
@@ -92,12 +94,15 @@ def main(argv=None) -> int:
 
         if not args.allow_egress:
             raise BatchError("live provider requests require explicit --allow-egress")
+        if any(path.resolve() == op for path in args.resume_from):
+            raise BatchError("resume source and destination operation must differ")
         secret = read_secret(args.secret)
         manifest = read_json(args.manifest)
         conn = readonly_database(args.db)
         try:
             runner = GLMChartRunner(op, secret=secret, allow_egress=True,
-                                    workers=args.workers, source_digest=_source_digest())
+                                    workers=args.workers, source_digest=_source_digest(),
+                                    resume_from=args.resume_from)
             summary = runner.run(conn, manifest, args.snapshot_root)
         finally:
             conn.close()
