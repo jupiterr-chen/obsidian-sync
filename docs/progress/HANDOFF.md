@@ -1,5 +1,9 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-11 11:42 当前后台任务：B3-2边界复核已启动。** `operations/chart-resolution-20261011/refine-run/`，容器e890a5b4…，计划c9f1ce9f…，helper1e98a369…；30项=21图表差异（含3图/表冲突）+9对照，native11/OCR14/来源unknown5，旧请求unknown全部排除，最多60调用/3并发；11:43:31实查3 dispatch/0返回、无熔断，真实请求已发出。固定121ff6c源、生产只读、新purpose/cache，proposal-only不激活。先看launch/started/cache/proposals/circuit与容器，不重复execute。B3-1审计已完成；下一步仅在本批完成或实质异常时集中验收，不重复全量分类、不重启OCR、不恢复半小时Codex唤醒。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节。下面为历史检查点。
+
+> **2026-10-11 当前：B3-1禁网只读审计已通过，B3-2小批工具准备中。** 审计工具121ff6c；server operation `chart-resolution-20261011/output/audit/`，容器203f8164…退出0。862全current，159快照核验，209native页全文精确对应；619图表几何一致/184双轮无chart/21图表分歧/38异常。原720分歧仅21涉及chart，另3图/表冲突可重叠。准备最多30页新目的GLM边界复核，不重跑B2/不发送unknown/不激活生产。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节；只读复核产物，勿重跑旧分类或审计容器。定时heartbeat仍暂停。
+
 > **2026-10-11 10:49 已收尾：862/862 分类结束。** 最后7批在03:13完成；独立核对10份接受报告与冻结清单，全覆盖无重漏、全部proposal-only。824项双轮结构有效、38项异常；104项双轮一致、720项分类/框选不一致，不能据此直接激活。生产服务健康，B3精确映射/裁图/发布未执行。当前入口 `remaining/continuation-v3-http/sequence-result.json`、`complete.json` 和[执行记录](GLM-CHART-BATCH-20261010.md)首节。旧分类任务已结束，勿重跑；Codex heartbeat保持暂停。以下为历史状态。
 
 > **2026-10-10 20:50 新续跑入口：continuation-v3-http。** 第 2 批 100 项/200 请求完成（96 双 valid，1 HTTP500/1 schema/2 truncated），旧 v3 在 19:04 因 HTTP500 门禁停止。累计处理230/862，剩余632。限定操作层 HTTP 留档规则验收及服务器真实预检通过；20:50:40 新监督器已脱离SSH启动，20:51:41已实查batch-003容器32b6dc87…运行，3workers/只读生产挂载正确，dispatch0（预检渲染）。新目录 `operations/glm-chart-batch-20261010/remaining/continuation-v3-http/`，计划 `39a3ba54…`，仅原003–009批、3并发、旧请求不重发、生产只读/proposal-only。先读新 sequence/launch/cache/complete/stopped，勿重启旧v3。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节；定时 Codex 唤醒仍暂停，B3未开始。以下均为历史检查点。

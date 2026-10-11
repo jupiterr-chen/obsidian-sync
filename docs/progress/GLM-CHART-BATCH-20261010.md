@@ -1,5 +1,25 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-11 11:42 B3-2 30 页 GLM 边界复核已启动
+
+11:43:31实查：容器running、无OOM，started存在；已dispatch3、持久结果0（3在途），无circuit-open。生产state/secret/source/全部输入均只读，仅新operation可写；不是只有空容器，模型请求确已发出。
+
+服务器 `operations/chart-resolution-20261011/refine-run/`；容器 `obsidian-sync-chart-refine-run-20261011` / `e890a5b4c550057560c2cc6b949b076f707bbc79d9933b35841f976a45976283` 于11:42:52脱离SSH启动。固定原有GLM-5.3-Flash/既有接口，3并发、最多60物理请求；原图、原文与原双轮候选作为新B3任务输入，两轮不见彼此的新回复。不重跑原B2，不外发旧unknown项，不改生产DB/Vault或常驻模型配置。
+
+计划SHA `c9f1ce9f892c36e8deb0c1bd127217e6e5d07d527ebd07de7335616bb48acd70`：30项无重复，包含全部21图表差异与3图/表冲突（3项是21项的子集），另9对照；native11/OCR14/来源unknown5。全部旧双轮valid且来源current，旧请求unknown为0。独立禁网plan-only与逐项集合/边界核验通过。B3-1的原30项sample计划保留，此处使用按真实问题重新排序的独立计划，不能混用其hash。
+
+私有 `b3_refine.py` SHA `1e98a36996653d08c4865d2775feff73dbe48b88b9b728c5c0017ac5da4074f3`，测试SHA `2f07c463ddbb6faf26b0be88e3e005ae3dfe425fc5f95e9940a36f94d8d9c652`。限定fake覆盖候选上下文绑定、缓存/未知不重发、HTTP500及TimeoutError留档、认证/错模型熔断与3并发；Codex另走完整execute+真实runner+fake底层transport，4项8请求全有效且输出proposal-only。合成测试不等同真实视觉质量通过。固定源121ff6c及chart_batch字节hash经过校验，未改应用。
+
+恢复时先看refine-run/launch.json、started.json、cache/*.dispatch.json及配对结果、proposals.json/circuit-open.json和准确容器状态；不要重复启动、覆盖plan或重试未知dispatch。普通TimeoutError/HTTP400/408/500/502/503/504作为单项例外保存，认证/403/429/错模型等停止。结果仍是proposal-only，尚未生成confirmed清单或发布正文。后续集中核对模型对分歧的处理、图表/表格/正文边界及精确映射，再小批隔离验收/发布。Codex定时heartbeat保持暂停。
+
+## 2026-10-11 B3-1 实际审计通过；准备小批边界复核
+
+固定工具 `121ff6ca33e8ed07d8844605bb3c07df54edd373`（新3项测试、原分类9项回归、独立顺序/跨类别冲突/旧样本排除反例通过）。服务器 `operations/chart-resolution-20261011/`，容器 `obsidian-sync-chart-resolution-20261011` / `203f8164…` 于11:32启动并退出0、无OOM。network=none，state/原operation/source只读，只有新output可写，无secret/Vault挂载；未改常驻服务。
+
+实际结果：862来源全current、159快照校验、209原生页完整去空白文字与当前block相同。862互斥分组为：619项双轮图表几何一致、184项双轮无chart、21项图表数量/位置有分歧、38项含异常。原720 disagreement中，535是图表一致但其它区域不同，164双轮无chart，21才涉及chart差异。另有3项图/表空间冲突（与前述可重叠）；不得把双轮无chart直接当成真实无图，也不能把几何一致当confirmed。
+
+B3-1仅检查native类别；其它653项未证明精确字符映射，不写exclude。私有结果 `output/audit/{aggregate,diagnosis,review-plan}.json` 已落盘。下一步B3-2优先21项图表差异与3项图/表冲突并集，再补边界一致/无chart分层样本到最多30，同既有GLM做最多60次有界复核；旧3个unknown对应项不外发，使用独立B3缓存身份并绑定原两轮候选，不重跑B2。保持proposal-only，结果验收之前不生成生产confirmed清单。此处仅记录准备，真实模型任务需以其launch/dispatch产物为准。
+
 ## 2026-10-11 B3 已开始：先做只读诊断与定位可行性核验
 
 用户要求继续下一步。当前执行 docs/43 的 B3-1：Luna 在三个新增工具/测试文件内实现产物审计，复用已完成862项和原30页视觉记录，拆分真正图表分歧与其它区域差异，并检验原生文字层能否精确对应。主会话负责有限反例验收及服务器禁网、生产只读运行。此阶段不调用模型、不激活投影、不改常驻服务或 Vault；后续定向复核与发布依实际诊断分批推进，不重跑全部分类。Codex定时heartbeat保持暂停。
