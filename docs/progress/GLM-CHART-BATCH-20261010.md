@@ -1,5 +1,25 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-11 17:40 B3-3：11 页 / 41 图映射通过，服务器自动发布接续已启动
+
+17:29 隔离容器 `0b3d5f8bdbb16cbb71acee71a4a829c77a2e3ebb17802b0bbac155dd11db2100` 启动，11页已在副本激活，正在构建检索索引；17:37 CPU约100%、IO持续。checker SHA `0de4fda1efe6bc103d307212cb24caa0aaf23f1c617e5e63d70db264c643127b`；验收包含真实目标postings、正文/图片发布、两次幂等复验及严格CAS回退后heads/原文/消费结果恢复，不声称回退重新构建第二次全库索引。
+
+17:40 一次性 `supervise_native_release.py` 已脱离SSH启动，随后实查进程身份匹配、started已落盘、日志零报错。SHA `da1970e8fe6941c954cfccd1bbf442f080dd815b2b03e8eb0dbe5ef97a8f10d3`；Luna限定实现后，Codex独立执行10项fake端到端测试通过，覆盖输入/版本/配置/写者门禁、部分停服恢复、SQLite备份、API错误projection ID拒绝、失败不覆盖旧DB。fake不代替真实验收。
+
+服务器每30秒检查准确隔离容器（最长等待6小时）；真实隔离检索/发布/幂等/回退通过且worker空闲后，自动冻结准确worker/API，生成 `frozen-backup/` 一致性备份，复核清单/当前版本/人工内容，应用本批投影、重建索引并发布，再恢复同一API/worker并核验原文、指定projection ID、41图片hash、PDF HEAD与原文件。固定现网6679872镜像，不更换应用/同步配置，不开启模型，不恢复Codex heartbeat。无需用户再次触发，可关闭本地电脑。
+
+恢复读新operation的 `supervisor-launch.json` / `supervisor-process.json` / `supervisor-started.json`、`isolated-launch.json`、`data-release-isolated-result.json`、`supervisor-status.json`、`apply-launch.json`、`data-release-production-result.json`、`server-verification.json`（按实际阶段存在）。禁止重复初始化/启动，PID仅作线索须核实身份。输入为 `manifests/` / `assets/` / `input-hashes.json`，视觉绑定为 `native-visual-acceptance.json`；隔离副本在 `isolated/`，生产冻结备份完成后才有 `frozen-backup/manifest.json`。异常保护新写入，不能用旧DB覆盖生产；恢复须核对本批manifest与当前heads后严格CAS回退。
+
+**截至17:40尚未切换生产**，原8页仍生效。生产通过后还需用 `server-verification.json` 元数据核对Windows新正文/41图及索引hash；文件匹配不等于实际Obsidian UI验收。剩余19个OCR/unknown复核页未获精确映射验收，862全库治理未完成。下方为本批视觉和准备证据。
+
+用户要求继续后，Codex 实际查看 B3 新计划中的全部 11 张 native 原页，并逐张核对生成的 41 个图表裁图。图表内部文字框与图题框分离，混排表格、正文、来源行及其它未归属文字保留。私有人工框 `reviewed-boxes.json` SHA `3d769318bdc38ce45a59e11a92032d43a4285f2e9258ea9978d7dd5b0c76df09`；图像/清单及逐页证据仅在忽略 runtime 和服务器 operation。
+
+17:21 禁网、生产只读映射容器 `3c2413c6…` 完成，11/11 页成功、0 失败、41 图。完整非空白原生文字层与数据库原文吻合；当前来源/有效提取/快照/无旧 head 验证通过。排除范围共 7,113 字符，仅为图表内部；5,971 字符位于另行明确保护的正文/表格区域，其余框外文字同样保留。原文未修改。独立检查全部 span 无重叠、无缺口；图题取数据库原文连续片段，未让模型编写标题或字符偏移。
+
+17:22 启动新 `operations/chart-native-release-20261011` 的隔离准备，容器 `67106561477f77d37ab790a728295e9b26f6272a028c9167a478c0813db5d3a8` 已退出 0。SQLite backup API 生成 36,486,787,072 字节副本，关键来源/投影表 quick_check、Vault 复制哈希及 11 清单/41 资产冻结通过；没有重新扫描历史全部 postings，不能把本次检查称为全库 integrity_check。生产 state/Vault 全程只读挂载。
+
+恢复先看新 operation 的 `prepare-launch.json`、`isolated-prepare-result.json`、`input-hashes.json` 及后续 `data-release-*-result.json` / `supervisor-status.json`（存在时），不要重跑初始化。隔离应用、检索/发布、幂等与回退检查通过后，才允许冻结准确 API/worker、一致性备份及本批数据投影切换；复用现网 6679872 镜像，不改应用配置或 Syncthing。此时尚未发布本批生产正文，原 8 页投影仍生效。剩余 19 个 OCR/unknown 复核页未获精确映射验收；862 全库治理未完成。无新增模型请求，Codex heartbeat 保持暂停。
+
 ## 2026-10-11 17:01 B3-2 已结束，结构核验通过，视觉/发布未完成
 
 本批30页于北京时间12:06:15结束，容器e890a5b4…退出0、无OOM；60次物理请求全部有持久结果，59 valid/1 truncated，无HTTP错误、无unknown、无熔断。17:01独立核对30项与冻结plan无重漏，逐轮dispatch身份/模型/端点及缓存status对应，全部proposal-only。私有结构验收记录 `operations/chart-resolution-20261011/refine-structural-acceptance.json`。

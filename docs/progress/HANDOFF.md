@@ -1,5 +1,9 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-11 17:40 当前：11页/41图的隔离验收及自动发布接续已在服务器独立运行。** operation `chart-native-release-20261011`；隔离容器 `0b3d5f8b…` 已应用11页、正在构建索引，生产仍原8页。监督器已脱离SSH，launch/process/started落盘且实际进程身份匹配，SHA `da1970e8…`；固定checker `0de4fda1…`、现网6679872镜像。真实隔离检索/发布/幂等/回退通过且worker空闲后，自动冻结准确写者→一致性备份→本批数据投影/索引/发布→恢复同一API/worker→接口/原文/图像/人工区验证。无需用户再触发，不恢复heartbeat。恢复先读supervisor-launch/started/status、data-release-isolated-result、apply-launch、data-release-production-result、server-verification（按阶段存在），禁止重复启动。生产完成后还须Windows正文/41图/索引hash核对及实际UI验收；剩余19个OCR/unknown复核页未映射，862全库未治理完。完整SHA、备份与失败边界见[执行记录](GLM-CHART-BATCH-20261010.md)首节；保护docs37。
+
+> **2026-10-11 B3-3 当前：11 native 页 / 41 图已真实视觉核验并精确映射，隔离备份准备已完成。** 新服务器 operation `chart-native-release-20261011`；prepare 容器 67106561…退出0，36,486,787,072字节 SQLite 一致性副本、Vault/清单/资产复制验证通过。恢复读 prepare-launch/isolated-prepare-result/input-hashes 和之后 data-release-*-result/supervisor-status（若有），不重复初始化。下一步隔离应用/发布/幂等/回退，通过后仅数据投影小批切换；生产仍6679872/原8页，本批尚未激活。私有视觉/映射证据在 chart-resolution-20261011/native-manifests-v1 与 native-visual-acceptance.json；11页41图实际查看，19个OCR/unknown复核页尚未精确映射。无新增模型调用，不恢复heartbeat，保护docs37。
+
 > **2026-10-11 17:01 当前：B3-2已在12:06完成，结构核验通过。** 30项60请求=59valid/1truncated，零HTTP/unknown/熔断，容器e890a5b4…退出0。原21分歧中18项新双轮图表一致、2仍分歧、1截断；全30项为27一致/2分歧/1截断，另1图/表冲突可重叠。真实视觉边界、精确字符映射与生产发布尚未完成，不能将模型一致直接confirmed。恢复入口 `chart-resolution-20261011/refine-run/proposals.json`、`refine-structural-acceptance.json` 及[执行记录](GLM-CHART-BATCH-20261010.md)首节；不重跑已结束模型任务，heartbeat保持暂停。
 
 > **2026-10-11 11:42 当前后台任务：B3-2边界复核已启动。** `operations/chart-resolution-20261011/refine-run/`，容器e890a5b4…，计划c9f1ce9f…，helper1e98a369…；30项=21图表差异（含3图/表冲突）+9对照，native11/OCR14/来源unknown5，旧请求unknown全部排除，最多60调用/3并发；11:43:31实查3 dispatch/0返回、无熔断，真实请求已发出。固定121ff6c源、生产只读、新purpose/cache，proposal-only不激活。先看launch/started/cache/proposals/circuit与容器，不重复execute。B3-1审计已完成；下一步仅在本批完成或实质异常时集中验收，不重复全量分类、不重启OCR、不恢复半小时Codex唤醒。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节。下面为历史检查点。
