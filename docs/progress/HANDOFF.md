@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> **2026-10-11 17:01 当前：B3-2已在12:06完成，结构核验通过。** 30项60请求=59valid/1truncated，零HTTP/unknown/熔断，容器e890a5b4…退出0。原21分歧中18项新双轮图表一致、2仍分歧、1截断；全30项为27一致/2分歧/1截断，另1图/表冲突可重叠。真实视觉边界、精确字符映射与生产发布尚未完成，不能将模型一致直接confirmed。恢复入口 `chart-resolution-20261011/refine-run/proposals.json`、`refine-structural-acceptance.json` 及[执行记录](GLM-CHART-BATCH-20261010.md)首节；不重跑已结束模型任务，heartbeat保持暂停。
+
 > **2026-10-11 11:42 当前后台任务：B3-2边界复核已启动。** `operations/chart-resolution-20261011/refine-run/`，容器e890a5b4…，计划c9f1ce9f…，helper1e98a369…；30项=21图表差异（含3图/表冲突）+9对照，native11/OCR14/来源unknown5，旧请求unknown全部排除，最多60调用/3并发；11:43:31实查3 dispatch/0返回、无熔断，真实请求已发出。固定121ff6c源、生产只读、新purpose/cache，proposal-only不激活。先看launch/started/cache/proposals/circuit与容器，不重复execute。B3-1审计已完成；下一步仅在本批完成或实质异常时集中验收，不重复全量分类、不重启OCR、不恢复半小时Codex唤醒。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节。下面为历史检查点。
 
 > **2026-10-11 当前：B3-1禁网只读审计已通过，B3-2小批工具准备中。** 审计工具121ff6c；server operation `chart-resolution-20261011/output/audit/`，容器203f8164…退出0。862全current，159快照核验，209native页全文精确对应；619图表几何一致/184双轮无chart/21图表分歧/38异常。原720分歧仅21涉及chart，另3图/表冲突可重叠。准备最多30页新目的GLM边界复核，不重跑B2/不发送unknown/不激活生产。详见[执行记录](GLM-CHART-BATCH-20261010.md)首节；只读复核产物，勿重跑旧分类或审计容器。定时heartbeat仍暂停。
