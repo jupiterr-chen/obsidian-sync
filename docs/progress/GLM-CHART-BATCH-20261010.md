@@ -1,5 +1,15 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-11 22:59：首轮验收误报已修正，v2 隔离复验与自动接续已启动
+
+22:51恢复检查发现首轮17:46已退出：`kept source terms are missing from target postings`。失败发生在副本索引/正文发布后、幂等验收前；隔离CAS回退完成且无回退错误。监督器停止，无stop-plan、无apply-launch，生产从未冻结或应用本批；library/API/Syncthing健康，worker运行。此前17:40记录仅为当时运行状态，不能延用为持续运行。
+
+限定排查确认私有checker将keep spans用空格拼接再分词，会制造不存在的词边界：合法相邻片段XYZ与123在完整投影中为XYZ123，旧门禁却要求xyz、123分别存在。此前完整投影与Counter postings严格相等的门禁并未报错。Luna仅在新 `data_release_check_v2.py` 将该门禁替换为原始offset字符映射/保留及准确图题追加校验；仍保留完整投影相等、全Counter、raw hash、资产、幂等和回退门禁。Codex独立6项测试通过，含相邻ASCII/中文span、保留字符缺失拒绝、真实小库posting缺失拒绝及完整隔离流程。v2 SHA `ceeedb25acdb356055f18ab9b06233664c76a5e7af6bb9adafbd53afed2513a4`；原checker、清单、图片、常驻应用均未改。另对首轮已关闭副本启动11页全量postings只读诊断，22:59尚未输出总结果，不把离线反例当作11页全部真实通过。
+
+新operation **`operations/chart-native-release-20261011-v2`**；旧operation和失败记录全部保留。22:55新一致性副本准备启动，22:58已退出0，11清单/41图hash与首轮完全一致。22:58:53新隔离复验启动，22:59实查running；现有监督器 `da1970e8…` 实际进程身份匹配并等待验收。`continue_v2.py` SHA `b98ad9bc9cbc5fadece319c168d58854c0cab9caa8204bf736cb6b96b1c55bb9` 仅串接已验收prepare/checker/supervisor，已记录 `continuation-result.json=isolated_and_supervisor_started`，不再重复运行。隔离通过后仍自动按下方固定门禁完成冻结备份、11页数据发布及API验证，无需用户再触发；此时生产仍原8页。
+
+恢复优先读取v2的 `continuation-result.json`、`isolated-launch.json`、`data-release-isolated-result.json`、`supervisor-status.json`、`apply-launch.json`、`data-release-production-result.json`、`server-verification.json`（按阶段生成）。监督器固定读v2目录中的 `data_release_check.py`，其字节为上述v2 SHA；不要混用首轮checker或重跑首轮监督器。Windows文件与实际UI验收仍待生产通过后执行。无新增模型调用、无常驻应用部署，heartbeat保持暂停，保护docs37。
+
 ## 2026-10-11 17:40 B3-3：11 页 / 41 图映射通过，服务器自动发布接续已启动
 
 17:29 隔离容器 `0b3d5f8bdbb16cbb71acee71a4a829c77a2e3ebb17802b0bbac155dd11db2100` 启动，11页已在副本激活，正在构建检索索引；17:37 CPU约100%、IO持续。checker SHA `0de4fda1efe6bc103d307212cb24caa0aaf23f1c617e5e63d70db264c643127b`；验收包含真实目标postings、正文/图片发布、两次幂等复验及严格CAS回退后heads/原文/消费结果恢复，不声称回退重新构建第二次全库索引。
