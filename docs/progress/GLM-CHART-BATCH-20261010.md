@@ -1,5 +1,15 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-11 10:49 阶段收尾：862 项分类全部结束，B3 未执行
+
+服务器最后 7 批在北京时间 03:13:31 完成，632 项全部产出；所有对应容器退出 0、无 OOM，监督器已退出，无新的停止记录。10:49 独立只读核对最终 10 份接受报告（试点30、合并首批100、第2批100、后7批632）与 frozen/candidates.json：862 个 item_id 全覆盖、无重复、无漏项，全部仍为 proposal_only/activation_allowed=false。第003–009批共1264次 dispatch 全有持久结果记录；其中一次 TimeoutError 为结果未知记录，不视作提供者成功返回，也未重发。
+
+最终按候选项：824 项双轮结构有效，38 项至少一轮异常。按接受的1724个逻辑轮次：1682 valid、12 truncated、16 invalid_json_or_schema、11 provider_http_error、3 unknown_dispatch。该轮次数包含复用结果，不能作为整个历史物理调用总数。
+
+一致性结果：104 agreement、720 disagreement、35 invalid、3 unknown_dispatch。现有比较规则要求区域数量一致、同类型区域逐一匹配且 IoU>=0.5；disagreement 不等于720项全部识别错误，但说明不能直接采用双轮结果批量激活。结构有效不等于真实图表质量验收通过。尚未进行剩余候选的精确字符映射、正文/真表格保护核验、裁图和投影发布（B3）；不得宣称全库治理完成。
+
+常驻 library/knowledge API/Syncthing healthy，普通worker运行；本轮仅核验分类产物，未部署或更改生产 DB/Vault。后续以 `remaining/continuation-v3-http/{sequence-result,complete}.json` 及本节为分类收尾入口，不再重启任何已结束分类/OCR容器。定时 Codex heartbeat继续暂停。下一阶段使用服务器统计差异/复用现有结果、GLM定向协助、Luna限定实现、Codex阶段验收，避免全量重复调用及高频主模型唤醒。
+
 ## 20:50 HTTP 500 留档续跑：已处理 230/862，剩余 632
 
 20:40 独立核对，第 2 批在 19:04:45 退出 0，200 个 dispatch 全有结果，100 项双轮齐备、96 项双轮 valid；轮次合计 196 valid、1 格式错误、2 截断、1 HTTP 500，无 circuit-open。旧 v3 监督器将 HTTP 500 拒绝为全局错误而停止，后续未启动。试点与两批累计处理 230 项（包含例外），剩余 632；不能将处理结束等同于图表治理完成。
