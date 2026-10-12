@@ -1,5 +1,13 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 15:05：29页隔离通过，正式生产索引构建中
+
+`operations/chart-governance-remaining-20261012` 的隔离容器已退出0，真实结果29 manifests/98 assets、两次幂等、回退和既有Vault保留通过。sequence已自动接生产，14:59 `release-native-01/supervisor-status.json=frozen_backup_ready` 后正式checker启动；此状态不代表尚未应用。
+
+生产容器以 `release-native-01/apply-launch.json` 为准，当前ID `edde357887f340d58ee4eba1f5ca4a003a7d36d9bb852fddec824cd4026be99d`。15:05实查最新stage=activation_progress/activated29，生产只读SQL确认本批29个head已存在，全部head48（旧8+冻结范围40）。正式索引构建有活动：CPU约81%、1.91GiB、累计写IO65.4GB。Library/API/worker已按发布流程停止，Syncthing健康；不要因服务exited/旧health unhealthy就擅自重启抢写。接续器待正式索引/正文检查后恢复服务并验证API。
+
+当前冻结范围已应用40/862，但只有先前11项完成发布与Windows验收；新增29尚未确认发布/同步，不把head存在当交付完成。读 `progress-latest.json` 得最近聚合快照（时间以文件为准），并读正式checker/result/server-verification；完成后按既定流程验Windows并继续118审查包和其他余量。无新增模型/OCR调用，不重启任何旧任务，不重复apply。
+
 ## 2026-10-12 14:26：新29页/98图已进入服务器隔离验收与自动发布接续
 
 **14:32追加恢复点：** 下一批118项审查材料已在服务器实际生成完毕，`followup-reviews/result.json` 为118/118、例外0，四包30/30/30/28；容器身份读 `followup-reviews-launch.json`，不可重跑。工具 `prepare_followup_reviews.py` SHA `a89449f4bb100126c321e31c3cade91fa1f15937e0e822e5153d0e792ec50681`，3个边界测试通过；仅复用缓存坐标/原分类并核对来源、重新渲染原图，没有新增模型或OCR调用。`followup-reviews/next-review-01..04/review/index.json` 是下一次集中边界验收入口；`ocr-position-index.json` 已绑定19页原图hash与976位置/3026行统计。118项仍是proposal，不是已治理；当前29页隔离checker仍运行，生产完成数仍11，勿在等待索引时重启任务。
