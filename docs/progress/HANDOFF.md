@@ -1,5 +1,21 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 14:26：新29页/98图已进入服务器隔离验收与自动发布接续
+
+**14:32追加恢复点：** 下一批118项审查材料已在服务器实际生成完毕，`followup-reviews/result.json` 为118/118、例外0，四包30/30/30/28；容器身份读 `followup-reviews-launch.json`，不可重跑。工具 `prepare_followup_reviews.py` SHA `a89449f4bb100126c321e31c3cade91fa1f15937e0e822e5153d0e792ec50681`，3个边界测试通过；仅复用缓存坐标/原分类并核对来源、重新渲染原图，没有新增模型或OCR调用。`followup-reviews/next-review-01..04/review/index.json` 是下一次集中边界验收入口；`ocr-position-index.json` 已绑定19页原图hash与976位置/3026行统计。118项仍是proposal，不是已治理；当前29页隔离checker仍运行，生产完成数仍11，勿在等待索引时重启任务。
+
+当前operation仍为 `operations/chart-governance-remaining-20261012`。已实际查看下一批30页原图并划定100个图表面板，保护正文/真实表格；严格原文字符映射通过29页/98图，序号1因图题映射覆盖不足暂留原文，不能算已治理。私有边界 `reviewed-boxes-v2.json`、产物 `native-batch-01/`，发布输入冻结在 `release-native-01/{manifests,assets}`，不复用或重跑旧11页。
+
+38,736,158,720字节一致性隔离备份及2,454文件Vault复制通过；29/98清单/资产hash与视觉批准全部一致。服务器脱离SSH接续器已启动，先读 `sequence-launch.json`、`sequence-current.json`；14:26 stage=isolated_started。准确容器 `obsidian-sync-chart-rem-isolated-01-20261012`，ID `6d662feb3e861514f06d03356e489d249d235869311946ecee52738853569588`，网络none，生产snapshots只读，隔离state/Vault可写。实际stage `activation_progress`，CPU约101%、内存1.85GiB，有IO活动。隔离检查点在 `isolated-native-01/operation/`；不要重新启动准备器、checker或整条链。
+
+链条会在隔离应用/幂等两次/原文保留/回退通过、worker空闲后，调用 `supervise_reviewed_batch.py` 复用固定6679872数据发布门禁：准确写者冻结、一致性备份、一次应用、索引/正文发布、API验证、恢复服务。新适配器仅为准确library容器的PDF HEAD增加60秒有界只读就绪重验。线上应用/模型开关不变。本轮尚未新增生产发布；全冻结范围完成数仍11/862，851待治理，其中29在发布验收管线。不要把隔离激活计入线上head。
+
+固定helper：构建器 `6664fd51…`；checker `ceeedb25acdb356055f18ab9b06233664c76a5e7af6bb9adafbd53afed2513a4`；接续器v2 `9210cc0b750846e55bbc215195e3c92f88df4c9232e5d7db076288cba1a8013d`；适配器 `f6f6dc3a68697557a17d619356313bc76109ffef33fa4388490071a7c3c7a04d`。旧监督器真实路径 `operations/chart-native-release-20261012/supervise_native_release.py`，SHA `6e699e44…`；worker状态 `state/knowledge-worker.json`。构建/适配/续接定向测试4+4+5通过，并实查当前29/98准备门禁通过。`continue_native_batch01.py` 是未通过审查的旧草稿，禁止执行；只用已启动v2。
+
+19页定向位置OCR已退出0，全部partial：3,026行OCR中976个精确映射片段；127低置信/空行、1,901非唯一或不匹配。不能当全页完成，不能重复OCR；后续复用图像/位置作针对性边界验收。156精确原生位置中，排除本次30后仍有118个双轮含图建议可形成下批审查包，另5无图建议、3轮异常待处置，不直接confirmed。
+
+完成本批服务器发布后，核对 `release-native-01/server-verification.json` 与实际服务，再下载仅元数据按published_files逐项验Windows；UI搜索仍待实测。此小批完成后继续剩余候选，定时跟进保持ACTIVE，不暂停为全库结项。保护docs37与原始证据；无新增模型调用。
+
 ## 2026-10-12 13:56：余量处理已实跑，19页坐标补取运行中
 
 服务器operation `operations/chart-governance-remaining-20261012`。851余量处理器已退出0，逐项结果覆盖冻结862：11已发布跳过、156精确原生坐标、695未获得完整精确位置；来源检查没有新增变动错误。下一批30页原图/双轮框/来源hash在 `coordinates/review/index.json`，仅审查材料，未获生产激活验收。分类模型结果全部复用，没有新增外发。
