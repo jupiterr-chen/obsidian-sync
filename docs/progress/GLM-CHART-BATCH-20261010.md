@@ -1,5 +1,17 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-12：内容验收已通过，接续正式生产发布
+
+**08:48:11实际生产写入已开始并完成11页投影应用：** `supervisor-status=frozen_backup_ready`，`frozen-backup/manifest.json`已存在，apply容器已启动；生产stage显示activated=11，独立SQLite只读查询live heads从8增加到19。当前正在正式索引构建，尚未确认正文发布、API恢复或Windows同步。接续无需再触发；下一步等本次生产checker和server-verification真实结果，再执行Windows文件验证，不能重跑apply。
+
+08:37复查：v2隔离容器已于昨日23:19:22退出0，11页/41图、完整投影与postings、两次幂等及CAS回退全部通过。原11页只读诊断也已完成：11/11完整索引完全匹配，11/11保留片段都在投影中，证实首轮分词附加门禁误报。生产仍原8个head，08:38实查revision与v2.initial_revision相同，不重跑已通过的全库隔离索引。
+
+v2监督器昨日23:19:25在停服前拒绝写者集合：对整个state目录做交集，将仅写state/syncthing和state/monitor的服务算入，同时漏把挂载项目上级目录的library纳入计划。未产生stop-plan或apply-launch，未改生产。Luna限定修正一次性监督脚本，改为保护knowledge.sqlite3及sidecars、chart-assets、snapshots的真实可写挂载范围；library加入准确冻结/恢复，Syncthing和collector不动，未知可达写者仍拒绝。4项离线反例通过；Codex另在服务器执行实际挂载、输入/配置hash、既有验收和revision预检，08:43全部通过。没有改常驻应用、模型或图表结果。
+
+新operation **`operations/chart-native-release-20261012`**，绑定v2真实通过结果SHA `8fd4e0e563349dd1a56155d0d06bde7a1d44ff3b387975c105f9eded88e00589`。监督脚本SHA `6e699e440d4f6a862775d254f64b3ab1ac86a7a6d6958c8e0cd5c6f711ec6f88`，生产checker仍`ceeedb25…`，输入11清单/41图与视觉验收完全相同。08:43:20监督器已脱离SSH启动；08:43:47实际library已停止、worker正在停机，开始正式冻结备份与生产发布流程，尚未声称写入或同步完成。复用同镜像6679872，不再运行隔离内容验收。
+
+恢复读新operation的 `preparation.json`、`real-preflight.json`、`supervisor-launch.json` / `supervisor-process.json` / `supervisor-status.json`、`stop-plan.json` / `stopped-*.json`、`frozen-backup/manifest.json`、`apply-launch.json`、`data-release-production-result.json`、`server-verification.json`（按阶段存在）。`isolated-launch.json`和`isolatedresult.json`为复制绑定的v2通过证据，不能当作本轮新隔离容器。生产成功后还须Windows新正文/41图/索引hash核对和实际UI验收；不宣称862全部治理完。不重复启动，不用旧DB覆盖新写入，按准确manifest/head做CAS恢复。heartbeat继续暂停；docs37不动。
+
 ## 2026-10-11 22:59：首轮验收误报已修正，v2 隔离复验与自动接续已启动
 
 22:51恢复检查发现首轮17:46已退出：`kept source terms are missing from target postings`。失败发生在副本索引/正文发布后、幂等验收前；隔离CAS回退完成且无回退错误。监督器停止，无stop-plan、无apply-launch，生产从未冻结或应用本批；library/API/Syncthing健康，worker运行。此前17:40记录仅为当时运行状态，不能延用为持续运行。
