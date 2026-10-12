@@ -1,5 +1,13 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 13:38：11页生产发布与Windows同步已完成
+
+本批新增11页（10份正文文件）/41图已经发布，live heads=19（含旧8页）。生产checker退出0并passed；13:37只读续验通过 raw 11/11、projected 11/11、assets 41/41、PDF HEAD 11/11。Windows 55/55文件存在、字节数与SHA256全部一致（10正文、41图片、4索引/状态/元数据）。入口Windows `ResearchVault/解析正文/开始阅读.md`。文件核验不等于真实Obsidian UI搜索验收，UI仍未实测。剩余862候选范围未全部治理，不声称7天观察完成。
+
+09:07原监督器在library重启后立即发起PDF HEAD时ConnectionRefused，随后恢复服务但未继续验收；原生产写入与发布已经通过。13:34确认原文HEAD已200，13:37复用固定监督器的verify_api及服务身份检查，仅执行读取，未重跑apply/索引、未重启服务、未调用模型。原失败stage/traceback保留。补验绑定冻结Vault hashes及备份字节，确认原有非生成文件未变、API/library/worker/Syncthing身份与镜像未变；当前监督器状态已记录published。
+
+恢复入口仍为服务器 `operations/chart-native-release-20261012/`：`server-verification.json`、`completion-verification-result.json`、`data-release-production-result.json`、`frozen-backup/manifest.json`。本地 `runtime/chart-native-release-20261012/server-verification.json`、`windows-verification.json`。不得重新部署本批或用旧DB覆盖；备份保留，回退须按本批准确manifest/head做CAS。下批仍需准确边界/字符映射；模型一致不能自动屏蔽正文/表格。自动反馈遵从用户最新每30分钟要求；可恢复异常先处理，不无声停机。保护docs37。
+
 > **2026-10-12 08:48当前：已经真实应用生产11页，live heads=19（原8+新11），正在构建正式索引。** 新operation仍`chart-native-release-20261012`；冻结一致性备份已通过，frozen-backup/manifest存在，apply已启动，stage activated=11，独立生产SQLite核验19heads。library/API/worker在切换流程中，Syncthing保持运行；正文/41图发布、服务恢复和接口验证由同一监督器接续。不得重复启动或因supervisor仍显示frozen_backup_ready误判未应用（它在等待checker完成）。下一次先读apply-launch、生产stage、data-release-production-result和server-verification；生产成功后下载元数据核对Windows新正文/41图/索引hash，实际UI另验。剩余候选未完成，不恢复heartbeat，不覆盖旧DB或改docs37。详情见[执行记录](GLM-CHART-BATCH-20261010.md)首节。
 
 > **2026-10-12 08:43 当前：已开始正式生产冻结/备份/发布流程，尚未确认应用完成。** v2隔离昨日23:19退出0，11页41图及幂等/回退全部通过，原11页真实postings诊断也全部相符；不重跑内容验收。此前监督器因state挂载范围判断和library未纳入而在停服前退出；限定修正、4反例及08:43真实服务器预检通过。新operation `chart-native-release-20261012`，supervisor SHA `6e699e44…`、checker仍`ceeedb25…`；08:43:20独立启动，08:43:47library已停、worker停机中，Syncthing/collector不动。恢复读取新op的supervisor-status、stopped记录、frozen-backup/manifest、apply-launch、data-release-production-result、server-verification；不能把复制的v2验收证据当新隔离运行。不重复启动，不覆盖DB；发布后还需Windows文件/实际UI验收。详情见[执行记录](GLM-CHART-BATCH-20261010.md)首节。heartbeat保持暂停，保护docs37。

@@ -1,5 +1,11 @@
 # 图表治理运行手册
 
+## 2026-10-12 本批发布结果与故障续验
+
+新增11页/41图已经完成生产及Windows文件验收：11 raw、11 projected、41 assets、11 PDF HEAD通过；Windows55文件全部hash/字节一致（10正文、41图、4索引/状态/元数据）。入口 `解析正文/开始阅读.md`；实际UI搜索未验，全库候选治理尚未完成。
+
+当前operation为 `operations/chart-native-release-20261012`；完成证据 `server-verification.json`、`completion-verification-result.json`，一致性备份 `frozen-backup/manifest.json`，Windows证据在同名runtime。旧09:07失败为library启动期间ConnectionRefused，发布checker已passed。恢复时先查当前服务就绪，再对已发布批次只读复核，不重新运行supervisor.run或apply；原失败记录保留。本批13:37已完成该续验，服务身份/镜像、原文件保护检查通过。未来启动顺序需等library/API就绪；复核失败应定位并接续已有授权，不能只暂停汇报后等待。
+
 2026-10-12接续：同一已上线6679872能力正在执行新增11页/41图的数据发布，operation `operations/chart-native-release-20261012`，进度见[GLM执行记录](progress/GLM-CHART-BATCH-20261010.md)首节。v2真实隔离验收及回退已经通过，不再重跑；本轮会冻结library/API/worker并在一致性备份后应用，保留Syncthing/collector运行及现有配置。完成标志必须是本轮 `data-release-production-result.json` 与 `server-verification.json` 通过，以及随后Windows文件验证，不能仅凭监督器启动声明上线。不得使用旧8页的恢复脚本盲目回退本轮11页。
 
 适用：docs/41 的图表治理交付。**2026-10-10 固定源码 `6679872` 已经独立验收、用户授权并上线 8 页/26 图像小批；生产/备份/Windows 36 文件验收通过，53 条精确旧副本搜索排除已配置，待 Obsidian 实际 UI 验收。** 当前状态、备份及结果见 [生产执行记录](progress/CHART-PRODUCTION-20261010.md)。本次许可不重复询问；以后的新代码仍须固定 commit 独立验收和对应生产授权，不能复用旧 OCR 授权。递归移动/删除仍需对准确绝对路径单独批准。

@@ -1,5 +1,13 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-12 13:38：生产与Windows发布闭环
+
+11页/41图生产checker于09:07退出0；随后PDF HEAD因library刚启动尚未接受连接失败（原traceback第625行），不是正文写入/索引失败。监督器恢复了全部服务，但任务未继续验收。该处处理和持续反馈没有及时接续，是本次延误原因。
+
+13:37对当前已健康服务执行只读续验：原文11、投影11、图像41、PDF HEAD11全部通过，固定镜像/容器身份/配置与冻结基线一致，非本批生成文件未变。记录 `server-verification.json`，将状态推进published；保留原失败stage/traceback，没有重新apply、重算索引、重启服务或调用模型。Windows独立文件核验55/55匹配：10正文文件涵盖11页，41图片，4索引/状态/元数据；hash与字节均一致。
+
+服务器operation仍 `operations/chart-native-release-20261012`，备份 `frozen-backup/`；本地 `runtime/chart-native-release-20261012/windows-verification.json`。入口 `ResearchVault/解析正文/开始阅读.md`。这只完成本批11页（加既有8页共19个head）；其余候选及真实UI搜索仍按原任务范围推进。后续监督脚本应等待library和API均就绪再验收，并支持只读续验；不要因启动瞬时连接失败重复发布或要求用户重新下发。
+
 ## 2026-10-12：内容验收已通过，接续正式生产发布
 
 **08:48:11实际生产写入已开始并完成11页投影应用：** `supervisor-status=frozen_backup_ready`，`frozen-backup/manifest.json`已存在，apply容器已启动；生产stage显示activated=11，独立SQLite只读查询live heads从8增加到19。当前正在正式索引构建，尚未确认正文发布、API恢复或Windows同步。接续无需再触发；下一步等本次生产checker和server-verification真实结果，再执行Windows文件验证，不能重跑apply。
