@@ -1,5 +1,15 @@
 # GLM 图表批处理执行记录（2026-10-10）
 
+## 2026-10-12 13:56：余量处理已实跑，19页坐标补取运行中
+
+服务器operation `operations/chart-governance-remaining-20261012`。851余量处理器已退出0，逐项结果覆盖冻结862：11已发布跳过、156精确原生坐标、695未获得完整精确位置；来源检查没有新增变动错误。下一批30页原图/双轮框/来源hash在 `coordinates/review/index.json`，仅审查材料，未获生产激活验收。分类模型结果全部复用，没有新增外发。
+
+19页非native坐标预检v3已19/19通过。准确运行容器 `obsidian-sync-chart-rem-ocr-positions-20261012`，ID `9ed915898a245e7fd49b1abe56c685135a0b4d291f3382df8e05dc3d65f051ac`，身份以 `ocr-position-launch.json` 为准，输出 `ocr-positions/status.json`、`items/`、`pages/`、`result.json`。禁网，state/classification/previous/source只读，operation可写，单进程；直接保留RapidOCR框及置信度，仅唯一精确文字位置/完整匹配形成proposal位置，不屏蔽任何生产文字。缺失/低置信/重复/不匹配保持partial/unknown。首次旧预检因每页重复全库effective计算而被准确停止并保留superseded记录；v3仅对当前文档求同一effective逻辑。不得重启旧预检或重复已完成页OCR。
+
+prepare_remaining.py固定SHA `d179ecf6766f28036909754c6ccc0d24c87aba22fb862bf6ef90bd4027b58e49`，5项限定测试及真机全量运行通过。recover_ocr_positions_v3.py以launch SHA为准，6个独立位置反例通过（原始offset空白、重复行、低置信、重叠、真实四点bbox形状、源hash变化零OCR），真实DB预检通过。运行产物仅在私有runtime/server operation，不入Git。生产服务不动；这156/19都是余量治理中间成果，不得计为新增发布。
+
+下一步：检查19页坐标结果与例外；从30页审查材料集中核对图表边界/正文表格保护，再准备下一批准确manifest并按既有隔离/发布链继续。不能停在“任务未运行”的循环汇报，也不能把自动位置提取当视觉确认。定时跟进应关注此余量operation并在阶段完成后衔接下一步，已完成11页release只作为基线。
+
 ## 2026-10-12 13:38：生产与Windows发布闭环
 
 11页/41图生产checker于09:07退出0；随后PDF HEAD因library刚启动尚未接受连接失败（原traceback第625行），不是正文写入/索引失败。监督器恢复了全部服务，但任务未继续验收。该处处理和持续反馈没有及时接续，是本次延误原因。

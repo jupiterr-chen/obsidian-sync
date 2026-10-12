@@ -1,5 +1,23 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 13:56：余量处理已实跑，19页坐标补取运行中
+
+服务器operation `operations/chart-governance-remaining-20261012`。851余量处理器已退出0，逐项结果覆盖冻结862：11已发布跳过、156精确原生坐标、695未获得完整精确位置；来源检查没有新增变动错误。下一批30页原图/双轮框/来源hash在 `coordinates/review/index.json`，仅审查材料，未获生产激活验收。分类模型结果全部复用，没有新增外发。
+
+19页非native坐标预检v3已19/19通过。准确运行容器 `obsidian-sync-chart-rem-ocr-positions-20261012`，ID `9ed915898a245e7fd49b1abe56c685135a0b4d291f3382df8e05dc3d65f051ac`，身份以 `ocr-position-launch.json` 为准，输出 `ocr-positions/status.json`、`items/`、`pages/`、`result.json`。禁网，state/classification/previous/source只读，operation可写，单进程；直接保留RapidOCR框及置信度，仅唯一精确文字位置/完整匹配形成proposal位置，不屏蔽任何生产文字。缺失/低置信/重复/不匹配保持partial/unknown。首次旧预检因每页重复全库effective计算而被准确停止并保留superseded记录；v3仅对当前文档求同一effective逻辑。不得重启旧预检或重复已完成页OCR。
+
+prepare_remaining.py固定SHA `d179ecf6766f28036909754c6ccc0d24c87aba22fb862bf6ef90bd4027b58e49`，5项限定测试及真机全量运行通过。recover_ocr_positions_v3.py以launch SHA为准，6个独立位置反例通过（原始offset空白、重复行、低置信、重叠、真实四点bbox形状、源hash变化零OCR），真实DB预检通过。运行产物仅在私有runtime/server operation，不入Git。生产服务不动；这156/19都是余量治理中间成果，不得计为新增发布。
+
+下一步：检查19页坐标结果与例外；从30页审查材料集中核对图表边界/正文表格保护，再准备下一批准确manifest并按既有隔离/发布链继续。不能停在“任务未运行”的循环汇报，也不能把自动位置提取当视觉确认。定时跟进应关注此余量operation并在阶段完成后衔接下一步，已完成11页release只作为基线。
+
+## 2026-10-12 13:47：全库余量接续准备中
+
+用户指出11页收尾后没有接续全库任务。已对冻结862与当前production heads做只读交集：本范围已发布11，剩余851=198native+457OCR+196unknown；全库head19中的旧8不在本范围。851按原双轮分类互斥分区：610图几何一致建议、184双轮无图建议、19图几何分歧、38含轮次异常；这些均不自动等于确认/错误。分类层已覆盖862，治理发布层尚未完成。
+
+新服务器operation `operations/chart-governance-remaining-20261012` 的 `scope.json` 已保存冻结hash、851准确ID和11排除ID；此时 `status=preparing_coordinate_runner`，还未声称服务器新处理器运行。Luna限定实现私有prepare_remaining.py（所有851的原生坐标恢复、来源校验、至多30页下一批审查图）及recover_ocr_positions.py（原B3计划中19个非native页的必要坐标补取）。只读state/snapshots，禁网，不改DB/Vault/常驻应用，不重新分类/重发成功请求。父agent须先验收实际形状fake和固定依赖，再启动准确容器并追加真实launch/进度。原B3 plan是 `chart-resolution-20261011/refine-run/plan.json`；不可错用旧audit/review-plan.json（非native数量不同）。现有LocalRapidOcr丢弃坐标，仅保存合并正文/置信度，没有发现可复用OCR框缓存。
+
+不再次把11页发布完成当全部任务完成；下一步必须产生余量处理实际运行记录，而不是只更新监控。保护docs37，备份/原文/人工区域保留。
+
 ## 2026-10-12 13:38：11页生产发布与Windows同步已完成
 
 本批新增11页（10份正文文件）/41图已经发布，live heads=19（含旧8页）。生产checker退出0并passed；13:37只读续验通过 raw 11/11、projected 11/11、assets 41/41、PDF HEAD 11/11。Windows 55/55文件存在、字节数与SHA256全部一致（10正文、41图片、4索引/状态/元数据）。入口Windows `ResearchVault/解析正文/开始阅读.md`。文件核验不等于真实Obsidian UI搜索验收，UI仍未实测。剩余862候选范围未全部治理，不声称7天观察完成。
