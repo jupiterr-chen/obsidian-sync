@@ -1,5 +1,7 @@
 # 会话检查点 / HANDOFF
 
+> 2026-10-12 15:09：用户同意将常规汇报改为每1小时，现有heartbeat已更新；服务器发布/接续继续运行。阶段完成或实质异常主动处理，不等待用户重新下发。当前29/98批次按同批隔离索引实测约14.4分钟作短期预估，最终以正式发布/API/Windows证据为准；全库日期尚无可靠上界。
+
 ## 2026-10-12 15:05：29页隔离通过，正式生产索引构建中
 
 `operations/chart-governance-remaining-20261012` 的隔离容器已退出0，真实结果29 manifests/98 assets、两次幂等、回退和既有Vault保留通过。sequence已自动接生产，14:59 `release-native-01/supervisor-status.json=frozen_backup_ready` 后正式checker启动；此状态不代表尚未应用。
