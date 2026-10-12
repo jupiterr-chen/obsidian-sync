@@ -1,5 +1,11 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 15:50之后：职责已切为只读验收与每小时跟踪
+
+用户最新要求其他agent只做数据、进度和服务验收，不能变更生产。入口[docs/45只读任务书](../45-readonly-acceptance-and-hourly-watch.md)、[docs/46可复制提示词](../46-readonly-acceptance-agent-prompt.md)。现有每小时heartbeat改为只读；下方15:31等历史“继续启动/发布”的指令不得再由监控agent执行。异常中断验收并只读排查、报警和留问题，不停止生产或自动修复。
+
+15:50现场读数仍为检查点40/862交付、822未完成，前批published；library/API/Syncthing健康，worker运行，restart_count全0。下一合并数据任务未启动，118项仍是待验材料。只读监控不承担启动余量，必须真实报告WAITING_REVIEW/等待执行者。Windows107/107证据时间15:29，UI未验。后续记录仅本机runtime/readonly-acceptance-watch及READONLY-ACCEPTANCE-LOG，不写服务器或覆盖旧operation状态，不自动git提交。保护docs37。
+
 ## 2026-10-12 15:31：29页发布闭环，合并发布工具已安装
 
 `chart-governance-remaining-20261012/release-native-01` 已完成：sequence/pinned监督器均published，生产checker通过；API实际29 raw、29 projected、98 assets、29 PDF通过，原文/人工区/历史保护通过。准确apply容器退出0；library/API健康、worker运行、原Syncthing健康。Windows在15:29核对107个发布文件，107/107存在且bytes/SHA一致，真实Obsidian UI搜索仍未实测。冻结范围已交付累计40/862，剩822；全head48含范围外旧8。不要重跑本批apply/隔离/索引。
