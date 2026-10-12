@@ -1,5 +1,15 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-12 15:31：29页发布闭环，合并发布工具已安装
+
+`chart-governance-remaining-20261012/release-native-01` 已完成：sequence/pinned监督器均published，生产checker通过；API实际29 raw、29 projected、98 assets、29 PDF通过，原文/人工区/历史保护通过。准确apply容器退出0；library/API健康、worker运行、原Syncthing健康。Windows在15:29核对107个发布文件，107/107存在且bytes/SHA一致，真实Obsidian UI搜索仍未实测。冻结范围已交付累计40/862，剩822；全head48含范围外旧8。不要重跑本批apply/隔离/索引。
+
+用户本轮授权提前本地修改，当前批完成后部署接续。Luna限定实现、Codex独立验收的合并发布工具源码 **08fc6fe8abf0bad1733a294b96223c7378f3e919** 已推送，并于15:30安装到服务器 `operations/chart-merged-release-tools-20261012/08fc6fe/`。安装记录 `installation-result.json`：两个CLI通过、前批真正完成/服务恢复/准确apply退出0及pinned chain导入通过；没有重启常驻服务或启动新数据发布。应用仍6679872。
+
+新工具：`ops_chart_release_bundle.py` SHA `8ee2622c1ba216656af33947eb3e3e0245af5e9b21f052c9764d85723a964275`；`ops_chart_release_sequence.py` SHA `a1e3bb0413f41ab8fe162e6b83a63365e195725c480aedc4555f7d0831dbce82`。14项单测13通过/1Windows symlink能力跳过；真实checker两包合并只一次build_generation、原文/人工区/幂等/回退通过；真实pinned chain仅fake进程I/O的接续集成也通过，一次隔离+一次监督器、重复拒绝。私有探针/安装证据在本地 `runtime/chart-merged-release-20261012/`。
+
+**下一步实际工作仍为118项审查包的集中视觉/精确映射验收，不是等待当前29页。** 四包仍在 `followup-reviews/next-review-01..04/review/index.json`，没有验收的不能输入合并器。将通过的子包原始manifest/assets及hash绑定审批合并进全新operation，一个合并批次一次隔离索引、一次生产索引；不要继续按每30页独立发布。新sequence要求bundle是新operation直接子目录，沿用 `prepare-native-01/isolated-prepare-result.json` 布局和旧固定checker；前批填上述release-native-01，准备真实合并隔离副本后先plan再execute。完整门禁/参数见docs/44。原19页OCR partial缓存复用、695未精确定位余量继续，未确认正文/表格保留。普通每1小时简报，阶段完成主动接续，不因小批结束暂停。保护docs37。
+
 > 2026-10-12 15:09：用户同意将常规汇报改为每1小时，现有heartbeat已更新；服务器发布/接续继续运行。阶段完成或实质异常主动处理，不等待用户重新下发。当前29/98批次按同批隔离索引实测约14.4分钟作短期预估，最终以正式发布/API/Windows证据为准；全库日期尚无可靠上界。
 
 ## 2026-10-12 15:05：29页隔离通过，正式生产索引构建中
