@@ -806,18 +806,32 @@ class KnowledgeStore:
     def write_postings(self, generation_id: str,
                        postings: List[Tuple[str, str, int]],
                        doc_terms: List[Tuple[str, int, int]]) -> None:
-        with self._tx() as conn:
-            conn.executemany(
-                "INSERT OR REPLACE INTO index_postings (generation_id, term, block_id, tf)"
-                " VALUES (?,?,?,?)",
-                [(generation_id, term, block_id, tf) for term, block_id, tf in postings],
-            )
-            conn.executemany(
-                "INSERT OR REPLACE INTO index_doc_terms (generation_id, block_id,"
-                " terms, length) VALUES (?,?,?,?)",
-                [(generation_id, block_id, terms, length)
-                 for block_id, terms, length in doc_terms],
-            )
+        # Match the B-tree key order instead of randomly touching leaf pages
+        # for each document. Stable sorts preserve last-write-wins for duplicate
+        # keys and avoid allocating millions of compound sort-key tuples.
+        from operator import itemgetter
+
+        ordered = sorted(postings, key=itemgetter(1))
+        ordered.sort(key=itemgetter(0))
+        with self._lock:
+            old_cache = int(self._conn.execute("PRAGMA cache_size").fetchone()[0])
+            self._conn.execute("PRAGMA cache_size=-131072")  # 128 MiB for this write
+            try:
+                with self._tx() as conn:
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO index_postings (generation_id, term, block_id, tf)"
+                        " VALUES (?,?,?,?)",
+                        ((generation_id, term, block_id, tf)
+                         for term, block_id, tf in ordered),
+                    )
+                    conn.executemany(
+                        "INSERT OR REPLACE INTO index_doc_terms (generation_id, block_id,"
+                        " terms, length) VALUES (?,?,?,?)",
+                        ((generation_id, block_id, terms, length)
+                         for block_id, terms, length in doc_terms),
+                    )
+            finally:
+                self._conn.execute("PRAGMA cache_size=%d" % old_cache)
 
     def postings_for_terms(self, generation_id: str,
                            terms: List[str]) -> Dict[str, List[Dict[str, Any]]]:

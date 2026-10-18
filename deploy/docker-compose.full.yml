@@ -88,6 +88,7 @@ services:
     profiles: ["enhanced-worker"]
     container_name: obsidian-sync-knowledge-worker
     command: ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
+    memswap_limit: ${RESEARCHKB_WORKER_MEMSWAP:-5g}
     environment:
       RESEARCHKB_KNOWLEDGE_CONFIG: /app-config/knowledge.json
     volumes:
@@ -102,7 +103,7 @@ services:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1g
+          memory: ${RESEARCHKB_WORKER_MEMORY:-4g}
     healthcheck:
       test: ["CMD", "python", "-m", "knowledge.healthcheck", "worker"]
       interval: 60s

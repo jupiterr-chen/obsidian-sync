@@ -28,11 +28,12 @@ services:
   knowledge-worker:
     <<: *knowledge-base
     command: ["python", "-m", "knowledge", "worker", "--config", "/app-config/knowledge.json"]
+    memswap_limit: ${RESEARCHKB_WORKER_MEMSWAP:-5g}
     deploy:
       resources:
         limits:
           cpus: "1.5"
-          memory: 1g
+          memory: ${RESEARCHKB_WORKER_MEMORY:-4g}
     healthcheck:
       test: ["CMD", "python", "-m", "knowledge.healthcheck", "worker"]
       interval: 60s

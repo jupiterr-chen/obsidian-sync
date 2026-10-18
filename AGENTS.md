@@ -1,5 +1,9 @@
 # 工程约定
 
+## 2026-10-18 Discord新增23项修复已闭环
+
+用户本轮明确授权排查慢索引、修复PNG并确保正文发布/同步；该授权适用于本批限定代码、元数据及worker替换，优先于历史只读监控职责。已完成23/23提取与正文、384/384块有效索引、49/49 Windows文件校验；记录`docs/progress/DISCORD-DELIVERY-REPAIR-20261018.md`。源码修复为排序/迭代写入postings和写入期间128MiB缓存；worker资源4GiB内存、总内存加交换5GiB。Library/API/Syncthing未替换。不要回滚或重跑本批；服务器operation为`operations/discord-delivery-repair-20261018`，`worker-rollout.json`和`delivery-verified.json`为恢复入口，旧等待监督器已superseded、finish_batch.py未执行。定时检测仍按用户要求暂停；本授权不扩展到其他资料重处理、全库图表激活或清理。
+
 ## 2026-10-12 只读验收与跟踪（最新职责限制）
 
 用户最新要求把验收过程交给其他agent，每1小时只做数据/进度/服务检查，不能变更生产。当前验收与heartbeat职责以docs/45、docs/46为准；下方历史“继续执行、自动接续、异常主动修复”等指令不适用于只读监控agent。禁止代码/生产DB/Vault/配置/审批/服务器operation写入，禁止执行发布脚本、模型/OCR、停启容器/进程或修复。异常时中断本轮成功判定并做有界只读排查、落盘问题、通知用户；不得把“中断”解释为停止生产。只允许本机runtime/readonly-acceptance-watch与脱敏监控日志写入，不自动Git提交。后续每小时继续跟踪事件，不重复创建调度。docs/37用户改动继续保护。

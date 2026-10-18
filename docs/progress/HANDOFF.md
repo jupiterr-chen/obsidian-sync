@@ -1,5 +1,13 @@
 # 会话检查点 / HANDOFF
 
+## 2026-10-18 12:20：昨天23份Discord资料已发布并同步
+
+本批23项（22 PDF+1 PNG）全部提取ready、23正文发布/入口链接、384块有效检索通过。Windows23正文+23卡片+3阅读状态文件共49/49 bytes/SHA一致；真实API逐篇证据和关键词检索通过。PNG源文件/hash未改，只修125650→184504字节元数据，两个准确失败job恢复后done/attempts=2。22 PDF原提取保留，没有全量OCR或模型调用。
+
+慢索引原因：全库约730万词项物化、第二份参数列表、无序B-tree写入、2MiB缓存以及worker1GiB内存/1GiB交换约束。新worker排序/迭代写入，写入缓存128MiB，内存4GiB/总5GiB；新generation `gen-eb50c9ebf47dc1a5907047d6`于12:11:04构建、12:18:04激活，整轮12:18:22成功idle。应用API/library仍6679872；仅worker使用`obsidian-sync:discord-index-20261018-dcc61fc8`，其他三服务身份与镜像未改。
+
+恢复：服务器`operations/discord-delivery-repair-20261018/{worker-rollout.json,image-ready.json,delivery-verified.json,worker-resources.override.json}`；完整记录[Discord交付修复](DISCORD-DELIVERY-REPAIR-20261018.md)。数据已通过，不重跑rollout/PNG修复；supervise_delivery旧等待器已superseded，finish_batch.py未执行。新worker按原1800秒间隔继续增量处理，已暂停的Codex定时器未恢复。Obsidian真实UI渲染未验，不将文件同步冒充UI验收。此事不替代仍未完结的图表余量任务。
+
 ## 2026-10-12 15:50之后：职责已切为只读验收与每小时跟踪
 
 用户最新要求其他agent只做数据、进度和服务验收，不能变更生产。入口[docs/45只读任务书](../45-readonly-acceptance-and-hourly-watch.md)、[docs/46可复制提示词](../46-readonly-acceptance-agent-prompt.md)。现有每小时heartbeat改为只读；下方15:31等历史“继续启动/发布”的指令不得再由监控agent执行。异常中断验收并只读排查、报警和留问题，不停止生产或自动修复。
