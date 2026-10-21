@@ -38,7 +38,12 @@ from .quality import (
 # page_ocr_status, empty-OCR/fallback-failure degradation) changed output
 # behavior - the recipe version bump forces a new identity so old products
 # are never silently reused.
-EXTRACT_CONFIG = {"normalization": 5, "blocks": "evidence-block-v1",
+# v6 (tables): HTML tables now ALSO persist their structured rows/header as
+# a bounded payload alongside the flat projection, and the projection joins
+# the FULL header onto every data row (was header[:4], and duplicate first
+# rows mis-served as header via list.index). Consumers can bind values to
+# (row, col) cells instead of guessing columns from flattened text.
+EXTRACT_CONFIG = {"normalization": 5, "blocks": "evidence-block-v2",
                   "ocr": "effective-config-v2",
                   "quality_gate": "page-status-v1"}
 
@@ -137,6 +142,10 @@ class Block:
     text: str
     locator: Dict[str, Any]    # conforms to evidence-block v1 locator
     quality: Quality = field(default_factory=lambda: Quality(STATUS_READY))
+    # Structured table payload (block_type=table only): bounded {"rows",
+    # "header_rows"} kept as displayed; numeric interpretation is derived at
+    # read time. None for every non-table block.
+    table: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -211,15 +220,18 @@ _TABLE_CELLS = {"td", "th"}
 
 
 class _DomBlock:
-    __slots__ = ("block_type", "text", "dom_path", "start_char", "end_char")
+    __slots__ = ("block_type", "text", "dom_path", "start_char", "end_char",
+                 "table")
 
     def __init__(self, block_type: str, text: str, dom_path: str,
-                 start_char: int, end_char: int):
+                 start_char: int, end_char: int,
+                 table: Optional[Dict[str, Any]] = None):
         self.block_type = block_type
         self.text = text
         self.dom_path = dom_path
         self.start_char = start_char
         self.end_char = end_char
+        self.table = table
 
 
 _BLOCK_SEPARATOR = "\n"
@@ -353,10 +365,20 @@ class _HtmlTreeParser(HTMLParser):
         elif tag == "table" and self.table_stack:
             table = self.table_stack.pop()
             if table["rows"]:
-                projection = _norm_ws(_table_projection(table["rows"])).strip()
+                # cells were already whitespace-normalized as they were
+                # collected; keeping the per-row newlines here preserves the
+                # row structure in the searchable text (one line per row)
+                projection = _table_projection(table["rows"]).strip()
                 if projection:
-                    dom_block = _DomBlock("table", projection, table["path"],
-                                          self.length, self.length)
+                    from .tables import bounded_table_payload
+
+                    # first row carries the column headers (same convention
+                    # the projection has always used)
+                    payload = bounded_table_payload(
+                        table["rows"], header_rows=1)
+                    dom_block = _DomBlock(
+                        "table", projection, table["path"],
+                        self.length, self.length, table=payload)
                     self._emit_separator()
                     dom_block.start_char = self.length
                     self._emit(projection)
@@ -379,14 +401,21 @@ class _HtmlTreeParser(HTMLParser):
 
 
 def _table_projection(rows: List[List[str]]) -> str:
-    """Searchable projection of a table: header joined onto each row."""
+    """Searchable projection of a table: the FULL header joined onto each
+    data row, so a recalled row carries its column names (period, currency,
+    metric) with it. Row position is taken from enumerate - list.index
+    returned the FIRST occurrence, so a data row duplicating the header got
+    misread as the header line.
+    """
     if not rows:
         return ""
     header = rows[0]
-    lines = []
-    for row in rows:
-        prefix = " | ".join(cell for cell in header[:4]) + " => " if rows.index(row) > 0 and header else ""
-        lines.append(prefix + " | ".join(row))
+    header_text = " | ".join(cell for cell in header)
+    lines = [header_text]
+    for index, row in enumerate(rows):
+        if index == 0:
+            continue
+        lines.append(header_text + " => " + " | ".join(row))
     return "\n".join(lines)
 
 
@@ -431,6 +460,7 @@ def _finalize_blocks(result: ExtractionResult, parser: _HtmlTreeParser,
             locator={"kind": "html", "dom_path": dom_block.dom_path,
                      "start_char": dom_block.start_char,
                      "end_char": dom_block.end_char},
+            table=dom_block.table,
         ))
     result.status = merge_statuses(result.status, quality.status)
     result.issues = sorted(set(result.issues) | set(quality.issues))

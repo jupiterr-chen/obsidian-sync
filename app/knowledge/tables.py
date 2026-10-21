@@ -120,3 +120,24 @@ class TableBlock:
                     "number": normalize_number(cell).to_dict() if r >= self.header_rows else None,
                 })
         return out
+
+
+# Storage-side bounds: a structured table is evidence, not a spreadsheet
+# import - payloads beyond these caps are trimmed (never rejected), keeping
+# the stored JSON bounded regardless of source HTML.
+MAX_TABLE_ROWS = 200
+MAX_TABLE_COLS = 40
+MAX_CELL_CHARS = 200
+
+
+def bounded_table_payload(rows: List[List[str]],
+                          header_rows: int = 0) -> Dict[str, Any]:
+    """JSON-safe, bounded table payload for block storage.
+
+    Cells are kept as displayed (no normalization at write time); numeric
+    interpretation is derived at read time via `TableBlock.normalized_cells`
+    so an improved normalizer applies to already-stored tables.
+    """
+    trimmed = [[str(cell)[:MAX_CELL_CHARS] for cell in row[:MAX_TABLE_COLS]]
+               for row in rows[:MAX_TABLE_ROWS]]
+    return {"rows": trimmed, "header_rows": int(header_rows or 0)}

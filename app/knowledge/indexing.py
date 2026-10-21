@@ -6,6 +6,18 @@ and bigrams (short-word recall: ``毛利`` matches both the bigram and the two
 unigrams). Ranking is BM25 computed over the inverted index at query time —
  adequate at research-corpus scale (hundreds of documents).
 
+Terms are produced from a DETERMINISTIC NORMALIZATION of the text: NFKC
+(full-width ``ＡＳＭＬ`` folds to ``ASML``, compatibility forms to canonical
+ones) followed by traditional→simplified conversion, so the simplified query
+``资产负债`` finds traditional ``資產負債`` blocks and vice versa. Both the
+index side and the query side fold through the same ``tokenize``; stored
+block text is NEVER rewritten — normalization lives only in this derived,
+rebuildable term space (raw content stays authoritative, ADR0004).
+
+Any change to tokenization MUST bump ``TOKENIZER_VERSION``: it is part of the
+generation manifest hash, so a tokenizer change forces a full index rebuild
+instead of silently reusing postings built with the old rules.
+
 Index content is immutable per generation; publishing swaps a single active
 pointer (ADR0003/0004 lineage).
 """
@@ -15,8 +27,11 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from opencc import OpenCC
 
 from .store import KnowledgeStore
 from .content import consumer_blocks, digest
@@ -28,10 +43,28 @@ DEFAULT_BM25_K1 = 1.5
 DEFAULT_BM25_B = 0.75
 MAX_QUERY_CHARS = 2000
 
+# Bump on ANY tokenizer behavior change (normalization, token shapes). Part
+# of the generation manifest so stale postings can never be reused.
+TOKENIZER_VERSION = "cjk-uni-bigram-v2-nfkc-t2s"
+
+_T2S = OpenCC("t2s")
+
+
+def normalize_for_terms(text: str) -> str:
+    """Deterministic pre-tokenization fold: NFKC then traditional→simplified.
+
+    Applied identically when indexing and when parsing a query; the stored
+    block text itself is never modified.
+    """
+    if not text:
+        return text
+    return _T2S.convert(unicodedata.normalize("NFKC", text))
+
 
 def tokenize(text: str) -> List[str]:
     """Mixed Chinese/English tokenization with short-word fallback."""
     terms: List[str] = []
+    text = normalize_for_terms(text)
     for match in ASCII_TERM_RE.finditer(text):
         terms.append(match.group(0).lower())
     for match in CJK_RE.finditer(text):
@@ -67,7 +100,10 @@ class SearchFilters:
 
 # v3: the shared selection prefers complete, ready extractions; polluted
 # blocks are excluded from default search. Old evidence remains reachable.
-SELECTION_POLICY = "current-version-complete-extraction-v3"
+# v4: term space now folds through NFKC + t2s (see TOKENIZER_VERSION); the
+# policy bump plus the tokenizer identity in the manifest force a one-time
+# full rebuild so postings can never mix old and new normalization.
+SELECTION_POLICY = "current-version-complete-extraction-v4"
 
 
 SELECTION_SQL = (
@@ -151,7 +187,8 @@ def build_generation(kb: KnowledgeStore, force: bool = False) -> Dict[str, Any]:
     manifest_source = "\n".join("%s:%s:%s" % (r["block_id"], r["extraction_id"], digest(r["text"]))
                                 for r in rows)
     manifest_hash = hashlib.sha256(
-        (SELECTION_POLICY + "\x00" + manifest_source).encode("utf-8")).hexdigest()
+        (SELECTION_POLICY + "\x00" + TOKENIZER_VERSION + "\x00"
+         + manifest_source).encode("utf-8")).hexdigest()
     active = kb.active_generation()
     if active and active["manifest_hash"] == manifest_hash and not force:
         return {"ok": True, "changed": False, "generation_id": active["generation_id"],

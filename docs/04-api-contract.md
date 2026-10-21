@@ -9,14 +9,29 @@
 |GET /health|仅存活，不返回敏感配置|
 |GET /ready|数据库和 active generation 就绪|
 |POST /search|关键词/混合检索，日期/公司/权限筛选|
+|GET /documents|文档目录列表：按 symbol/doc_type/source/日期/可用性枚举文档（身份驱动，非文本召回）|
 |GET /documents/{source}/{doc_id}|元数据、可访问版本和正文状态|
 |GET /documents/{source}/{doc_id}/versions/{version_id}|固定源版本|
-|GET /evidence/{block_id}|不可变证据及上下文|
+|GET /evidence/{block_id}|不可变证据及上下文；表格块附带结构化 table 节|
 |GET /extractions/{extraction_id}/blocks|游标分页正文块|
 |GET /changes?cursor=...|新增/修订/撤回事件，供客户端增量消费|
 |POST /analysis-runs|后续带引用分析任务，默认未启用|
 |GET /analysis-runs/{run_id}|状态、草稿、用量和验证结果|
 |POST /memory-proposals/{id}/review|后续确认/拒绝，要求写权限|
+
+## 检索归一化
+
+检索词空间在索引侧与查询侧做同一确定性归一化：NFKC（全角折叠为半角，兼容形式归一）+ 繁→简转换。简体查询「资产负债」与繁体「資產負債」互相命中；存储的块原文永不改写，归一化只存在于可重建的词项层。分词器任何行为变化都会 bump `TOKENIZER_VERSION` 并进入 generation manifest，强制整代重建，杜绝新旧归一化混用同一索引。
+
+## 文档目录列表
+
+`GET /documents?symbol=01810&doc_type=earnings&source=reports&date_from=2025-01-01&available=true&limit=50&cursor=...`。稳定顺序（source, doc_id）；limit 默认 50、上限 100；分页窗口上限 1000（超出 422 result_window_exceeded）。响应为 `{documents, total, limit, offset, next_cursor}`，每条含文档级元数据、`version_count`、`current_version_id`、`document_url` 与 `metadata_flags`；版本明细需读取单文档接口。游标绑定过滤集摘要与元数据 epoch（变化即 409 cursor_expired）。
+
+`metadata_flags` 为**建议性**读时质量标志，不改动、不拒绝存储值：`period_invalid`（期间非 YYYY-MM-DD）、`period_suspect`（期间与发布日相差超 400 天，如 FY2023 年报期间写成上一财年末）、`period_missing`/`symbol_missing`（财报类文档缺期间/代码）。消费端应把被标记字段视为未核验。
+
+## 表格证据
+
+HTML 表格块（block_type=table）在可检索平铺文本（全表头逐行拼接）之外，持久化结构化 `rows`/`header_rows`（写入时有界：≤200 行、≤40 列、单元格 ≤200 字符）。`GET /evidence/{block_id}` 对表格块返回兄弟级 `table` 节：`{rows, header_rows, normalized_cells}`；数字解释为**读时**派生（千分位、括号负数、币种符号、百分号；歧义分组保守置空并给原因），evidence-block v1 契约本身不变。
 
 ## 搜索请求
 

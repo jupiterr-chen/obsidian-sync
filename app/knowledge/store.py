@@ -131,6 +131,15 @@ CREATE TABLE IF NOT EXISTS blocks (
     UNIQUE (extraction_id, ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_blocks_extraction ON blocks(extraction_id);
+-- Structured table payloads for block_type=table blocks: rows as displayed
+-- plus header row count. Bounded at write time (tables.bounded_table_payload);
+-- numeric interpretation stays read-time so normalizer improvements apply to
+-- already-stored tables. Absent row = block has no table structure.
+CREATE TABLE IF NOT EXISTS block_tables (
+    block_id TEXT PRIMARY KEY REFERENCES blocks(block_id),
+    rows_json TEXT NOT NULL,
+    header_rows INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS index_generations (
     generation_id TEXT PRIMARY KEY,
     manifest_hash TEXT NOT NULL,
@@ -1303,12 +1312,13 @@ class KnowledgeStore:
                 ),
             )
             for ordinal, block in enumerate(blocks):
+                block_id = "%s-b%04d" % (extraction["extraction_id"], ordinal)
                 conn.execute(
                     "INSERT INTO blocks (block_id, extraction_id, ordinal, block_type,"
                     " text, locator_json, quality_status, quality_issues_json)"
                     " VALUES (?,?,?,?,?,?,?,?)",
                     (
-                        "%s-b%04d" % (extraction["extraction_id"], ordinal),
+                        block_id,
                         extraction["extraction_id"], ordinal,
                         block["block_type"], block["text"],
                         json.dumps(block["locator"], ensure_ascii=False),
@@ -1317,6 +1327,15 @@ class KnowledgeStore:
                                    ensure_ascii=False),
                     ),
                 )
+                table = block.get("table")
+                if isinstance(table, dict) and isinstance(table.get("rows"), list):
+                    conn.execute(
+                        "INSERT INTO block_tables (block_id, rows_json, header_rows)"
+                        " VALUES (?,?,?)",
+                        (block_id,
+                         json.dumps(table["rows"], ensure_ascii=False),
+                         int(table.get("header_rows") or 0)),
+                    )
         return True
 
     def get_extraction(self, extraction_id: str) -> Optional[Dict[str, Any]]:
@@ -1345,20 +1364,51 @@ class KnowledgeStore:
         result["stats"] = json.loads(result.pop("stats_json") or "{}")
         return result
 
+    @staticmethod
+    def _attach_tables(conn: sqlite3.Connection,
+                       items: List[Dict[str, Any]]) -> None:
+        """Attach structured table payloads (when stored) to block dicts in place.
+
+        Only block_type=table rows can carry one; malformed stored JSON is
+        skipped, never surfaced as a table.
+        """
+        candidates = [item for item in items
+                      if item.get("block_type") == "table"]
+        if not candidates:
+            return
+        ids = [item["block_id"] for item in candidates]
+        placeholders = ",".join("?" for _ in ids)
+        rows = conn.execute(
+            "SELECT block_id, rows_json, header_rows FROM block_tables"
+            " WHERE block_id IN (%s)" % placeholders, ids).fetchall()
+        by_id = {row["block_id"]: row for row in rows}
+        for item in candidates:
+            row = by_id.get(item["block_id"])
+            if row is None:
+                continue
+            try:
+                parsed = json.loads(row["rows_json"] or "[]")
+            except ValueError:
+                continue
+            if isinstance(parsed, list):
+                item["table"] = {"rows": parsed,
+                                 "header_rows": int(row["header_rows"] or 0)}
+
     def get_blocks(self, extraction_id: str) -> List[Dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM blocks WHERE extraction_id=? ORDER BY ordinal",
                 (extraction_id,)).fetchall()
-        result = []
-        for row in rows:
-            item = dict(row)
-            item["locator"] = json.loads(item.pop("locator_json") or "{}")
-            item["quality"] = {
-                "status": item.pop("quality_status"),
-                "issues": json.loads(item.pop("quality_issues_json") or "[]"),
-            }
-            result.append(item)
+            result = []
+            for row in rows:
+                item = dict(row)
+                item["locator"] = json.loads(item.pop("locator_json") or "{}")
+                item["quality"] = {
+                    "status": item.pop("quality_status"),
+                    "issues": json.loads(item.pop("quality_issues_json") or "[]"),
+                }
+                result.append(item)
+            self._attach_tables(self._conn, result)
         return result
 
     def get_block_with_identity(self, block_id: str) -> Optional[Dict[str, Any]]:
@@ -1370,14 +1420,15 @@ class KnowledgeStore:
                 " e.extraction_id, e.source, e.doc_id, e.version_id, e.snapshot_sha256"
                 " FROM blocks b JOIN extractions e ON e.extraction_id = b.extraction_id"
                 " WHERE b.block_id=?", (block_id,)).fetchone()
-        if not row:
-            return None
-        item = dict(row)
-        item["locator"] = json.loads(item.pop("locator_json") or "{}")
-        item["quality"] = {
-            "status": item.pop("quality_status"),
-            "issues": json.loads(item.pop("quality_issues_json") or "[]"),
-        }
+            if not row:
+                return None
+            item = dict(row)
+            item["locator"] = json.loads(item.pop("locator_json") or "{}")
+            item["quality"] = {
+                "status": item.pop("quality_status"),
+                "issues": json.loads(item.pop("quality_issues_json") or "[]"),
+            }
+            self._attach_tables(self._conn, [item])
         return item
 
     def snapshots_missing_extract_jobs(self, stage_digest: str,

@@ -292,6 +292,7 @@ class JobRunner:
             "text": block.text,
             "locator": block.locator,
             "quality": {"status": block.quality.status, "issues": block.quality.issues},
+            "table": block.table,
         } for block in result.blocks]
         recorded = self.kb.record_extraction({
             "extraction_id": extraction_id,

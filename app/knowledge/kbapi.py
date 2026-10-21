@@ -14,8 +14,10 @@ import base64
 import hashlib
 import json
 import os
+import re
 import traceback
 import uuid
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +31,62 @@ from .store import KnowledgeStore
 PERM_READ = "research.read"
 RESULT_WINDOW_MAX = 1000  # R12: hard pagination window
 PERM_ADMIN_JOBS = "admin.jobs"
+
+# ---------------------------------------------------------------------------
+# Document metadata quality flags (advisory, read-time, deterministic).
+#
+# A flag records an observable inconsistency - a malformed period literal or
+# an implausible period/published distance - it never rewrites or rejects
+# the stored catalog value. Consumers should treat a flagged field as
+# UNVERIFIED rather than trusting or discarding it blindly.
+# ---------------------------------------------------------------------------
+# doc_type substrings (case-insensitive) that mark a document as a financial
+# filing expected to carry a report period and an issuer symbol.
+FINANCIAL_DOC_TYPE_TOKENS: Tuple[str, ...] = (
+    "report", "earnings", "results", "interim", "annual", "quarter",
+    "公告", "報告", "报告", "財報", "财报", "季報", "季报", "年報", "年报",
+    "中期", "业绩", "業績",
+)
+_PERIOD_DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DAY_PREFIX_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
+# A filing is normally published days-to-months after its period end; a gap
+# beyond this many days in EITHER direction means period or published_at is
+# suspect (e.g. an FY2023 annual stored with the previous fiscal year end).
+PERIOD_SUSPECT_GAP_DAYS = 400
+
+
+def _iso_day(value: Any) -> Optional[date]:
+    """Leading YYYY-MM-DD of a stored date/timestamp, or None if absent/malformed."""
+    if not value:
+        return None
+    match = _DAY_PREFIX_RE.match(str(value).strip())
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def document_metadata_flags(doc: Dict[str, Any]) -> List[str]:
+    """Bounded metadata flags for one kb_documents row (see block comment)."""
+    flags: List[str] = []
+    period = str(doc.get("report_period") or "").strip()
+    symbol = str(doc.get("symbol") or "").strip()
+    doc_type = str(doc.get("doc_type") or "").strip().lower()
+    if period and not _PERIOD_DAY_RE.match(period):
+        flags.append("period_invalid")
+    period_day = _iso_day(period)
+    published_day = _iso_day(doc.get("published_at"))
+    if (period_day is not None and published_day is not None
+            and abs((published_day - period_day).days) > PERIOD_SUSPECT_GAP_DAYS):
+        flags.append("period_suspect")
+    if any(token in doc_type for token in FINANCIAL_DOC_TYPE_TOKENS):
+        if not period:
+            flags.append("period_missing")
+        if not symbol:
+            flags.append("symbol_missing")
+    return flags
 
 
 class KbApiError(Exception):
@@ -271,6 +329,128 @@ class KbApi:
             "score": hit.score,
         }
 
+    def list_documents(self, params: Dict[str, List[str]]) -> Dict[str, Any]:
+        """Directory listing over kb_documents (identity-driven enumeration).
+
+        Lets a consumer enumerate a subject's document set deterministically
+        (e.g. every filing for one symbol) instead of reconstructing it from
+        keyword recall, where "no hits" was indistinguishable from "not in
+        the library". Stable order (source, doc_id); the cursor is bound to
+        the filter set and the metadata epoch, mirroring search pagination.
+        """
+        def _single(name: str) -> Optional[str]:
+            # accepts parse_qs shape (list) and bare strings from direct callers
+            value = params.get(name)
+            if isinstance(value, (list, tuple)):
+                return value[0] if value else None
+            return value if isinstance(value, str) else None
+
+        def _values(name: str) -> List[str]:
+            value = params.get(name)
+            if isinstance(value, (list, tuple)):
+                return [item for item in value if isinstance(item, str)]
+            return [value] if isinstance(value, str) else []
+
+        where: List[str] = []
+        args: List[Any] = []
+        symbols = [s for s in _values("symbol") if s.strip()]
+        if symbols:
+            where.append("UPPER(COALESCE(d.symbol,'')) IN (%s)"
+                         % ",".join("?" for _ in symbols))
+            args.extend(s.upper() for s in symbols)
+        doc_type = _single("doc_type")
+        if doc_type:
+            where.append("UPPER(COALESCE(d.doc_type,'')) = UPPER(?)")
+            args.append(doc_type)
+        source = _single("source")
+        if source:
+            where.append("d.source = ?")
+            args.append(source)
+        date_expr = ("COALESCE(d.report_date, substr(d.published_at,1,10),"
+                     " d.filing_date, substr(d.first_seen_at,1,10))")
+        date_from = _single("date_from")
+        if date_from:
+            where.append(date_expr + " >= ?")
+            args.append(date_from)
+        date_to = _single("date_to")
+        if date_to:
+            where.append(date_expr + " <= ?")
+            args.append(date_to)
+        available = _single("available")
+        if available is not None:
+            normalized = available.strip().lower()
+            if normalized not in ("true", "false", "1", "0"):
+                raise KbApiError(400, "invalid_filters",
+                                 "available must be true|false")
+            where.append("d.available = ?")
+            args.append(1 if normalized in ("true", "1") else 0)
+        limit = 50
+        raw_limit = _single("limit")
+        if raw_limit is not None:
+            try:
+                limit = int(raw_limit)
+            except ValueError:
+                raise KbApiError(400, "invalid_limit", "limit must be an integer")
+        if not 1 <= limit <= 100:
+            raise KbApiError(400, "invalid_limit", "limit must be 1..100")
+        # digest over the RESOLVED filter values so callers may pass parse_qs
+        # lists or bare strings interchangeably without breaking cursors
+        filter_digest = hashlib.sha256(json.dumps(
+            {"symbol": symbols, "doc_type": doc_type, "source": source,
+             "date_from": date_from, "date_to": date_to,
+             "available": (available.strip().lower()
+                           if available is not None else None)},
+            sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+        cursor = _single("cursor")
+        offset = 0
+        if cursor:
+            decoded = decode_cursor(cursor)
+            if decoded.get("digest") != filter_digest:
+                raise KbApiError(409, "cursor_expired",
+                                 "cursor belongs to a different filter set")
+            if decoded.get("epoch") and                     decoded.get("epoch") != self.metadata_epoch():
+                raise KbApiError(409, "cursor_expired",
+                                 "document metadata changed; restart pagination")
+            try:
+                offset = int(decoded.get("offset", 0))
+            except (TypeError, ValueError):
+                raise KbApiError(400, "invalid_cursor", "cursor offset invalid")
+        if offset + limit > RESULT_WINDOW_MAX:
+            raise KbApiError(422, "result_window_exceeded",
+                             "pagination window exceeds %d documents"
+                             % RESULT_WINDOW_MAX, retryable=False)
+        clause = (" WHERE " + " AND ".join(where)) if where else ""
+        listing_sql = (
+            "SELECT d.*,"
+            " (SELECT COUNT(*) FROM kb_versions v"
+            "   WHERE v.source=d.source AND v.doc_id=d.doc_id) AS version_count,"
+            " (SELECT v2.version_id FROM kb_versions v2"
+            "   WHERE v2.source=d.source AND v2.doc_id=d.doc_id"
+            "   AND v2.is_current=1 LIMIT 1) AS current_version_id"
+            " FROM kb_documents d" + clause +
+            " ORDER BY d.source, d.doc_id LIMIT ? OFFSET ?")
+        with self.kb._lock:
+            rows = self.kb._conn.execute(
+                listing_sql, [*args, limit, offset]).fetchall()
+            total_row = self.kb._conn.execute(
+                "SELECT COUNT(*) FROM kb_documents d" + clause, args).fetchone()
+        total = int(total_row[0]) if total_row else 0
+        documents = []
+        for row in rows:
+            doc = dict(row)
+            doc["available"] = bool(doc.pop("available"))
+            doc["metadata_flags"] = document_metadata_flags(doc)
+            doc["document_url"] = "/api/kb/v1/documents/%s/%s" % (
+                doc["source"], doc["doc_id"])
+            documents.append(doc)
+        next_cursor = None
+        if offset + limit < total:
+            next_cursor = encode_cursor({
+                "digest": filter_digest, "epoch": self.metadata_epoch(),
+                "offset": offset + limit})
+        return {"documents": documents, "total": total, "limit": limit,
+                "offset": offset, "next_cursor": next_cursor}
+
     def document(self, source: str, doc_id: str) -> Dict[str, Any]:
         with self.kb._lock:
             doc = self.kb._conn.execute(
@@ -285,6 +465,7 @@ class KbApi:
             raise KbApiError(404, "not_found", "document not found")
         result = dict(doc)
         result["available"] = bool(result.pop("available"))
+        result["metadata_flags"] = document_metadata_flags(result)
         version_list = []
         for v in versions:
             v = dict(v)
@@ -388,7 +569,7 @@ class KbApi:
             from .content import consumer_blocks
             context_before = [b["text"] for b in consumer_blocks(self.kb, siblings[max(0,index-1):index])]
             context_after = [b["text"] for b in consumer_blocks(self.kb, siblings[index+1:index+2])]
-        return {
+        response = {
             "evidence": evidence,
             "default_projection": {k: projection.get(k) for k in
                                    ("projection_id", "text", "chart_assets", "content_policy")},
@@ -399,6 +580,22 @@ class KbApi:
             "source_version_url": "/api/kb/v1/documents/%s/%s/versions/%s" % (
                 row["source"], row["doc_id"], row["version_id"]),
         }
+        raw_table = row.get("table") if isinstance(row, dict) else None
+        if isinstance(raw_table, dict) and isinstance(raw_table.get("rows"), list):
+            # Sibling section (NOT part of the evidence-block v1 contract):
+            # the structured table with read-time numeric interpretation, so
+            # consumers bind a value to (row, col) instead of guessing the
+            # column of a flattened text line.
+            from .tables import TableBlock
+
+            table = TableBlock(rows=raw_table["rows"],
+                               header_rows=int(raw_table.get("header_rows") or 0))
+            response["table"] = {
+                "rows": table.rows,
+                "header_rows": table.header_rows,
+                "normalized_cells": table.normalized_cells(),
+            }
+        return response
 
     def extraction_blocks(self, extraction_id: str, cursor: Optional[str],
                           limit: int = 50) -> Dict[str, Any]:
@@ -648,6 +845,11 @@ class Handler(BaseHTTPRequestHandler):
 
             if route[:1] == ["documents"]:
                 self.api.authenticate(self._bearer(), PERM_READ)
+                if len(route) == 1 and self.command == "GET":
+                    # directory listing: identity-driven enumeration over
+                    # kb_documents (symbol/doc_type/source/date filters)
+                    return self._send(200, self.api.list_documents(
+                        self._query()), head_only)
                 if len(route) == 3:
                     return self._send(200, self.api.document(route[1], route[2]),
                                       head_only)
