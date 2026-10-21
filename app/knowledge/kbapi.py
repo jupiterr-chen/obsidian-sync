@@ -53,6 +53,30 @@ _DAY_PREFIX_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
 # beyond this many days in EITHER direction means period or published_at is
 # suspect (e.g. an FY2023 annual stored with the previous fiscal year end).
 PERIOD_SUSPECT_GAP_DAYS = 400
+# 財政年度/財務年度 titles imply the fiscal calendar, so the report period
+# must be one of a small set of period-end conventions. Real defect this
+# catches: 「2023財政年度中期報告」 stored with report_period=2021-12-31
+# (correct: 2022-09-30). Bounded deterministic rule; titles without the
+# fiscal-year phrase (10-K, 業績公告, broker notes) are never checked.
+_FISCAL_TITLE_RE = re.compile(
+    r"(20\d{2})\s*(?:財政年度|财政年度|財務年度|财务年度)(中期)?")
+
+
+def _expected_period_ends(fiscal_year: int, interim: bool) -> frozenset:
+    """Period-end conventions implied by a 財政年度 (fiscal-year) title.
+
+    Annual: year ending fiscal_year-03-31 (Apr–Mar fiscal, e.g. 9988) or
+    fiscal_year-12-31 (calendar year). Interim: six months to (fiscal_year
+    -1)-09-30 (Apr–Mar) or mid-year/quarter ends within fiscal_year.
+    """
+    if interim:
+        return frozenset({
+            "%d-09-30" % (fiscal_year - 1),
+            "%d-06-30" % fiscal_year,
+            "%d-09-30" % fiscal_year,
+            "%d-12-31" % fiscal_year,
+        })
+    return frozenset({"%d-03-31" % fiscal_year, "%d-12-31" % fiscal_year})
 
 
 def _iso_day(value: Any) -> Optional[date]:
@@ -81,6 +105,16 @@ def document_metadata_flags(doc: Dict[str, Any]) -> List[str]:
     if (period_day is not None and published_day is not None
             and abs((published_day - period_day).days) > PERIOD_SUSPECT_GAP_DAYS):
         flags.append("period_suspect")
+    if period_day is not None:
+        title = "%s\n%s" % (doc.get("title") or "", doc.get("display_title") or "")
+        fiscal_mentions = _FISCAL_TITLE_RE.findall(title)
+        if fiscal_mentions:
+            consistent = any(
+                period_day.isoformat() in _expected_period_ends(int(year), bool(interim))
+                for year, interim in fiscal_mentions
+            )
+            if not consistent:
+                flags.append("period_title_mismatch")
     if any(token in doc_type for token in FINANCIAL_DOC_TYPE_TOKENS):
         if not period:
             flags.append("period_missing")

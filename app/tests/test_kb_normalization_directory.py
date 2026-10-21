@@ -29,6 +29,7 @@ from knowledge.kbapi import (
     KbApi,
     KbApiError,
     build_kb_server,
+    document_metadata_flags,
     encode_cursor,
 )
 from knowledge.store import KnowledgeStore
@@ -214,6 +215,56 @@ class DirectoryListingTest(unittest.TestCase):
                    if d["doc_id"] == "ODD-PERIOD")
         self.assertIn("period_invalid", odd["metadata_flags"])
         self.assertNotIn("period_suspect", odd["metadata_flags"])
+
+    def test_fiscal_title_period_mismatch_catches_real_defect(self):
+        # 生产实况：FY2023 中期报告的期间错存为 2021-12-31（正确应为 2022-09-30）
+        self.kb.upsert_documents([
+            _doc("reports", "ALI-FY23-INT", "09988",
+                 report_period="2021-12-31",
+                 first_seen="2023-05-20T00:00:00Z",
+                 published_at=None),
+        ], "2026-10-02T00:00:00Z",
+        )
+        # _doc 不写 title；直接改写已入库行的标题
+        with self.kb._lock:
+            self.kb._conn.execute(
+                "UPDATE kb_documents SET title=? WHERE doc_id=?",
+                ("2023財政年度中期報告", "ALI-FY23-INT"))
+            self.kb._conn.commit()
+        doc = self.api.document("reports", "ALI-FY23-INT")
+        self.assertIn("period_title_mismatch", doc["metadata_flags"])
+
+    def test_fiscal_title_correct_periods_pass(self):
+        cases = [
+            ("2023財政年度中期報告", "2022-09-30"),   # 4-3月财年中期
+            ("2026 財務年度中期報告", "2025-09-30"),
+            ("2021財政年度報告", "2021-03-31"),        # 4-3月财年年报
+            ("2024財務年度中期報告", "2023-09-30"),
+        ]
+        for index, (title, period) in enumerate(cases):
+            doc_id = "FYCASE-%d" % index
+            self.kb.upsert_documents([
+                _doc("reports", doc_id, "09988", report_period=period,
+                     published_at=None),
+            ], "2026-10-02T00:00:00Z")
+            with self.kb._lock:
+                self.kb._conn.execute(
+                    "UPDATE kb_documents SET title=? WHERE doc_id=?",
+                    (title, doc_id))
+                self.kb._conn.commit()
+            doc = self.api.document("reports", doc_id)
+            self.assertEqual(doc["metadata_flags"], [], title)
+
+    def test_fiscal_title_rule_is_bounded(self):
+        # 无财年短语的标题（10-K / 业绩公告 / 券商标题）不做该检查
+        doc = {"doc_type": "10-K", "symbol": "AAPL", "report_period": "2021-12-31",
+               "published_at": None, "title": "Form 10-K fiscal year 2021"}
+        self.assertNotIn("period_title_mismatch", document_metadata_flags(doc))
+        # 多财年提及时，任一解释一致即通过（保守不误报）
+        doc2 = {"doc_type": "ANNUAL", "symbol": "09988",
+                "report_period": "2022-03-31", "published_at": None,
+                "title": "對比 2022財政年度 與 2023財政年度中期報告"}
+        self.assertNotIn("period_title_mismatch", document_metadata_flags(doc2))
 
     def test_single_document_carries_flags(self):
         doc = self.api.document("reports", "ALI-FY23")
